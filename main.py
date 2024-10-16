@@ -11,7 +11,7 @@ from discord_webhook import DiscordWebhook
 
 load_dotenv()
 
-SENSORS_CONFIG_PATH = os.getenv('SENSORS_CONFIG_PATH', 'sensors.example.yml')
+SENSORS_CONFIG_PATH = os.getenv('SENSORS_CONFIG_PATH', 'sensors.yml')
 MQTT_BROKER_ADDRESS = os.getenv('MQTT_BROKER_ADDRESS', 'localhost')
 MQTT_BROKER_PORT = int(os.getenv('MQTT_BROKER_PORT', '1883'))
 MQTT_QOS = int(os.getenv('MQTT_QOS', '0'))
