@@ -12,6 +12,7 @@ from discord_webhook import DiscordWebhook
 load_dotenv()
 
 SENSORS_CONFIG_PATH = os.getenv('SENSORS_CONFIG_PATH', 'sensors.yml')
+RTL_433_ARGS = os.getenv('RTL_433_ARGS', '')
 MQTT_BROKER_ADDRESS = os.getenv('MQTT_BROKER_ADDRESS', 'localhost')
 MQTT_BROKER_PORT = int(os.getenv('MQTT_BROKER_PORT', '1883'))
 MQTT_QOS = int(os.getenv('MQTT_QOS', '0'))
@@ -200,6 +201,7 @@ def main():
     print(f'433-mqtt-bridge version {os.getenv("IMAGE_VERSION")}')
 
     print(f'{SENSORS_CONFIG_PATH=}')
+    print(f'{RTL_433_ARGS=}')
     print(f'{MQTT_BROKER_ADDRESS=}')
     print(f'{MQTT_BROKER_PORT=}')
     print(f'{MQTT_QOS=}')
@@ -228,9 +230,13 @@ def main():
     mqttc.connect(MQTT_BROKER_ADDRESS, MQTT_BROKER_PORT, 60)
     mqttc.loop_start()
 
-    command = ['rtl_433', '-d', '1', '-t', 'digital_agc', '-F', 'json']
+    command = f'rtl_433 {RTL_433_ARGS}'
+    if '-F json' not in command:
+        command += ' -F json'
+    command_args = [arg.strip() for arg in command.split(' ') if arg.strip() != '']
 
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print(f'Running rtl_433 with arguments {" ".join(command_args[1:])}')
+    process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     threading.Thread(target=read_stderr, args=(process,)).start()
     threading.Thread(target=read_stdout, args=(process,)).start()
