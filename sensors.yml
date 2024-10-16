@@ -1,0 +1,20 @@
+sensors:
+  - topic_prefix: 'outdoor/terras'
+    identifier:
+      model: 'Nexus-T'
+      id: 251
+      channel: 1
+    keys:
+      temperature: 'temperature_C'
+  - topic_prefix: 'outdoor/binnenplaatsje'
+    identifier:
+      model: 'Fineoffset-WH5'
+      id: 60
+    keys:
+      temperature: 'temperature_C'
+      humidity: 'humidity'
+
+ignored_sensors:
+  - model: 'KlikAanKlikUit-Switch'
+  - model: 'Proove-Security'
+  - model: 'Nexa-Security'

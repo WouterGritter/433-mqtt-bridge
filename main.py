@@ -4,13 +4,14 @@ import json
 import threading
 from datetime import datetime
 from typing import Optional
-
+import yaml
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 from discord_webhook import DiscordWebhook
 
 load_dotenv()
 
+SENSORS_CONFIG_PATH = os.getenv('SENSORS_CONFIG_PATH', 'sensors.yml')
 MQTT_BROKER_ADDRESS = os.getenv('MQTT_BROKER_ADDRESS', 'localhost')
 MQTT_BROKER_PORT = int(os.getenv('MQTT_BROKER_PORT', '1883'))
 MQTT_QOS = int(os.getenv('MQTT_QOS', '0'))
@@ -98,36 +99,9 @@ class RadioSensor:
 
 mqttc: Optional[mqtt.Client] = None
 
-sensors = [
-    RadioSensor(
-        topic_prefix='outdoor/terras',
-        identifier=SensorIdentifier({
-            'model': 'Nexus-T',
-            'id': 251,
-            'channel': 1,
-        }),
-        keys={
-            'temperature': 'temperature_C',
-        },
-    ),
-    RadioSensor(
-        topic_prefix='outdoor/binnenplaatsje',
-        identifier=SensorIdentifier({
-            'model': 'Fineoffset-WH5',
-            'id': 60,
-        }),
-        keys={
-            'temperature': 'temperature_C',
-            'humidity': 'humidity',
-        },
-    ),
-]
+sensors: list[RadioSensor] = []
 
-ignored_sensors = [
-    SensorIdentifier({'model': 'KlikAanKlikUit-Switch'}),
-    SensorIdentifier({'model': 'Proove-Security'}),
-    SensorIdentifier({'model': 'Nexa-Security'}),
-]
+ignored_sensors: list[SensorIdentifier] = []
 
 
 def parse_rtl_433_packet(line: str) -> Optional[Packet]:
@@ -145,6 +119,21 @@ def parse_rtl_433_packet(line: str) -> Optional[Packet]:
         del packet['repeat']
 
     return Packet(packet, receive_time)
+
+
+def process_packet(packet: Packet):
+    sensor = find_sensor(packet)
+    if sensor is not None:
+        sensor.process(packet)
+    else:
+        print(f'Received packet from unknown sensor: {json.dumps(packet.data)}')
+
+        discord_message = '**Received 433 MHz data from unknown sensor/device** :open_mouth:\n' + \
+                          '```json\n' + \
+                          f'{json.dumps(packet.data, indent=2)}\n' + \
+                          '```'
+
+        send_discord_message(discord_message)
 
 
 def send_discord_message(message: str):
@@ -189,42 +178,48 @@ def read_stdout(process):
         if packet is None:
             continue
 
-        if previous_packets.contains_duplicate(packet):
-            print('skipping duplicate packet ' + json.dumps(packet.data))
+        if is_ignored(packet):
+            print('Skipping ignored packet ' + json.dumps(packet.data))
             continue
 
-        if is_ignored(packet):
-            print('skipping ignored packet ' + json.dumps(packet.data))
+        if previous_packets.contains_duplicate(packet):
+            print('Skipping duplicate packet ' + json.dumps(packet.data))
             continue
 
         previous_packets.add(packet)
 
-        sensor = find_sensor(packet)
-        if sensor is None:
-            print(f'Received packet from unknown sensor: {line.strip()}')
-
-            discord_message = '**Received 433 MHz data from unknown sensor/device** :open_mouth:\n' + \
-                              '```json\n' + \
-                              f'{json.dumps(packet.data, indent=2)}\n' + \
-                              '```'
-
-            send_discord_message(discord_message)
-
-            continue
-
-        sensor.process(packet)
+        process_packet(packet)
 
 
 def main():
-    global mqttc
+    global sensors, ignored_sensors, mqttc
 
     print(f'433-mqtt-bridge version {os.getenv("IMAGE_VERSION")}')
 
+    print(f'{SENSORS_CONFIG_PATH=}')
     print(f'{MQTT_BROKER_ADDRESS=}')
     print(f'{MQTT_BROKER_PORT=}')
     print(f'{MQTT_QOS=}')
     print(f'{MQTT_RETAIN=}')
     print(f'{DISCORD_WEBHOOK_URL=}')
+
+    with open(SENSORS_CONFIG_PATH, 'r') as f:
+        config = yaml.safe_load(f)
+
+    sensors = [
+        RadioSensor(
+            topic_prefix=sensor['topic_prefix'],
+            identifier=SensorIdentifier(sensor['identifier']),
+            keys=sensor['keys'],
+        )
+        for sensor in config['sensors']
+    ]
+
+    ignored_sensors = [
+        SensorIdentifier(sensor) for sensor in config['ignored_sensors']
+    ]
+
+    print(f'Loaded {len(sensors)} sensors and {len(ignored_sensors)} ignored sensors.')
 
     mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     mqttc.connect(MQTT_BROKER_ADDRESS, MQTT_BROKER_PORT, 60)
