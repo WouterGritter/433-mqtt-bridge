@@ -21,6 +21,10 @@ DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 RATE_LIMIT_RESET_INTERVAL = 60 * 60 * 8
 RATE_LIMIT = 100
 
+IGNORE_DATA_KEYS = [
+    'repeat',
+]
+
 
 class Packet:
     def __init__(self, data: dict[str, any], receive_time: datetime):
@@ -106,19 +110,20 @@ ignored_sensors: list[SensorIdentifier] = []
 
 def parse_rtl_433_packet(line: str) -> Optional[Packet]:
     try:
-        packet = json.loads(line)
+        data = json.loads(line)
     except json.JSONDecodeError:
         return None
 
     # Fetch time from packet
-    receive_time = datetime.strptime(packet['time'], "%Y-%m-%d %H:%M:%S")
-    del packet['time']
+    receive_time = datetime.strptime(data['time'], "%Y-%m-%d %H:%M:%S")
+    del data['time']
 
     # Remove unnecessary keys
-    if 'repeat' in packet:
-        del packet['repeat']
+    for key in IGNORE_DATA_KEYS:
+        if key in data:
+            del data[key]
 
-    return Packet(packet, receive_time)
+    return Packet(data, receive_time)
 
 
 def process_packet(packet: Packet):
@@ -176,14 +181,15 @@ def read_stdout(process):
 
         packet = parse_rtl_433_packet(line)
         if packet is None:
+            print('Error while parsing packet: ' + line.strip())
             continue
 
         if is_ignored(packet):
-            print('Skipping ignored packet ' + json.dumps(packet.data))
+            print('Skipping ignored packet: ' + json.dumps(packet.data))
             continue
 
         if previous_packets.contains_duplicate(packet):
-            print('Skipping duplicate packet ' + json.dumps(packet.data))
+            print('Skipping duplicate packet: ' + json.dumps(packet.data))
             continue
 
         previous_packets.add(packet)
