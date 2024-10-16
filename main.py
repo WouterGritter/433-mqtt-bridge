@@ -19,6 +19,12 @@ MQTT_QOS = int(os.getenv('MQTT_QOS', '0'))
 MQTT_RETAIN = os.getenv('MQTT_RETAIN', 'false') == 'true'
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
+# Mapping mqtt attribute -> data key
+DATA_KEY_MAP = {
+    'temperature': 'temperature_C',
+    'humidity': 'humidity',
+}
+
 IGNORE_DATA_KEYS = [
     'repeat',
 ]
@@ -77,17 +83,16 @@ class SensorIdentifier:
 
 
 class RadioSensor:
-    def __init__(self, topic_prefix: str, identifier: SensorIdentifier, keys: dict[str, str]):
+    def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
         self.topic_prefix = topic_prefix
         self.identifier = identifier
-        self.keys = keys
 
     def matches(self, packet: Packet) -> bool:
         return self.identifier.matches(packet)
 
     def extract(self, packet: Packet) -> dict[str, any]:
         data = packet.data
-        return {key: data[value] for key, value in self.keys.items() if value in data}
+        return {mqtt_attribute: data[data_key] for mqtt_attribute, data_key in DATA_KEY_MAP.items() if data_key in data}
 
     def process(self, packet: Packet) -> None:
         if not self.matches(packet):
@@ -102,7 +107,6 @@ class RadioSensor:
 mqttc: Optional[mqtt.Client] = None
 
 sensors: list[RadioSensor] = []
-
 ignored_sensors: list[SensorIdentifier] = []
 
 
@@ -126,9 +130,16 @@ def parse_rtl_433_packet(line: str) -> Optional[Packet]:
 
 def process_packet(packet: Packet):
     sensor = find_sensor(packet)
-    if sensor is not None:
-        sensor.process(packet)
-    else:
+
+    if packet.data.get('button', 0) == 1:
+        print(f'Button pressed on {"unknown" if sensor is None else "known"} sensor: {json.dumps(packet.data)}')
+        discord_message = f'**Button pressed {"unknown" if sensor is None else "known"} on sensor** :bell:\n' + \
+                          '```json\n' + \
+                          f'{json.dumps(packet.data, indent=2)}\n' + \
+                          '```'
+
+        send_discord_message(discord_message)
+    elif sensor is None:
         print(f'Received packet from unknown sensor: {json.dumps(packet.data)}')
 
         discord_message = '**Received 433 MHz data from unknown sensor/device** :open_mouth:\n' + \
@@ -137,6 +148,9 @@ def process_packet(packet: Packet):
                           '```'
 
         send_discord_message(discord_message)
+
+    if sensor is not None:
+        sensor.process(packet)
 
 
 def send_discord_message(message: str):
@@ -182,16 +196,10 @@ def read_stdout(process):
             print('Error while parsing packet: ' + line.strip())
             continue
 
-        if is_ignored(packet):
-            print('Skipping ignored packet: ' + json.dumps(packet.data))
-            continue
-
-        if previous_packets.contains_duplicate(packet):
-            print('Skipping duplicate packet: ' + json.dumps(packet.data))
+        if is_ignored(packet) or previous_packets.contains_duplicate(packet):
             continue
 
         previous_packets.add(packet)
-
         process_packet(packet)
 
 
@@ -215,7 +223,6 @@ def main():
         RadioSensor(
             topic_prefix=sensor['topic_prefix'],
             identifier=SensorIdentifier(sensor['identifier']),
-            keys=sensor['keys'],
         )
         for sensor in config['sensors']
     ]
