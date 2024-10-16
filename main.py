@@ -18,9 +18,6 @@ MQTT_QOS = int(os.getenv('MQTT_QOS', '0'))
 MQTT_RETAIN = os.getenv('MQTT_RETAIN', 'false') == 'true'
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
-RATE_LIMIT_RESET_INTERVAL = 60 * 60 * 8
-RATE_LIMIT = 100
-
 IGNORE_DATA_KEYS = [
     'repeat',
 ]
