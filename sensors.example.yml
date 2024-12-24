@@ -1,13 +1,24 @@
 sensors:
-  - topic_prefix: 'outdoor/terras'
+  - type: temperature
+    topic_prefix: 'outdoor/terras'
     identifier:
       model: 'Nexus-T'
       id: 251
       channel: 1
-  - topic_prefix: 'outdoor/binnenplaatsje'
+  - type: temperature
+    topic_prefix: 'outdoor/binnenplaatsje'
     identifier:
       model: 'Fineoffset-WH5'
       id: 60
+  - type: button
+    topic_prefix: 'misc/abcdremote'
+    identifier:
+      model: 'custombutton'
+    buttons:
+      020f5b8: 'a'
+      00a08e8: 'b'
+      00a0878: 'c'
+      00a08d8: 'd'
 
 ignored_sensors:
   - model: 'KlikAanKlikUit-Switch'

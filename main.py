@@ -2,6 +2,7 @@ import os
 import subprocess
 import json
 import threading
+from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional
 import yaml
@@ -18,12 +19,6 @@ MQTT_BROKER_PORT = int(os.getenv('MQTT_BROKER_PORT', '1883'))
 MQTT_QOS = int(os.getenv('MQTT_QOS', '0'))
 MQTT_RETAIN = os.getenv('MQTT_RETAIN', 'false') == 'true'
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
-
-# Mapping mqtt attribute -> data key
-DATA_KEY_MAP = {
-    'temperature': 'temperature_C',
-    'humidity': 'humidity',
-}
 
 IGNORE_DATA_KEYS = [
     'repeat',
@@ -82,7 +77,7 @@ class SensorIdentifier:
         return True
 
 
-class RadioSensor:
+class RadioSensor(ABC):
     def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
         self.topic_prefix = topic_prefix
         self.identifier = identifier
@@ -90,18 +85,52 @@ class RadioSensor:
     def matches(self, packet: Packet) -> bool:
         return self.identifier.matches(packet)
 
-    def extract(self, packet: Packet) -> dict[str, any]:
-        data = packet.data
-        return {mqtt_attribute: data[data_key] for mqtt_attribute, data_key in DATA_KEY_MAP.items() if data_key in data}
+    @abstractmethod
+    def process(self, packet: Packet) -> None:
+        pass
+
+
+class TemperatureRadioSensor(RadioSensor):
+    def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
+        super().__init__(topic_prefix, identifier)
 
     def process(self, packet: Packet) -> None:
-        if not self.matches(packet):
-            raise Exception('Packet does not match sensor')
+        data_key_map = {
+            'temperature': 'temperature_C',
+            'humidity': 'humidity',
+        }
 
-        data = self.extract(packet)
+        data = {mqtt_attribute: packet.data[data_key] for mqtt_attribute, data_key in data_key_map.items() if data_key in packet.data}
         for attribute, value in data.items():
             topic = f'{self.topic_prefix}/{attribute}'
             mqttc.publish(topic, value, qos=MQTT_QOS, retain=MQTT_RETAIN)
+
+
+class ButtonRadioSensor(RadioSensor):
+    def __init__(self, topic_prefix: str, identifier: SensorIdentifier, buttons: dict[str, str]):
+        super().__init__(topic_prefix, identifier)
+
+        self.buttons = buttons
+
+    def matches(self, packet: Packet) -> bool:
+        if not super().matches(packet):
+            return False
+
+        codes = [row['data'] for row in packet.data['rows']]
+        for code in codes:
+            if code in self.buttons.keys():
+                return True
+        return False
+
+    def process(self, packet: Packet) -> None:
+        codes = [row['data'] for row in packet.data['rows']]
+        for code in codes:
+            button = self.buttons.get(code, None)
+            if button is not None:
+                topic = f'{self.topic_prefix}/{button}'
+                mqttc.publish(topic, 'pressed', qos=MQTT_QOS, retain=False)
+
+                send_discord_message(f':black_square_button: Button `{button}` got pressed on remote `{self.topic_prefix}`')
 
 
 mqttc: Optional[mqtt.Client] = None
@@ -203,6 +232,23 @@ def read_stdout(process):
         process_packet(packet)
 
 
+def build_sensor(config: dict):
+    sensor_type = config.get('type', 'temperature')
+    if sensor_type == 'temperature':
+        return TemperatureRadioSensor(
+            topic_prefix=config['topic_prefix'],
+            identifier=SensorIdentifier(config['identifier']),
+        )
+    elif sensor_type == 'button':
+        return ButtonRadioSensor(
+            topic_prefix=config['topic_prefix'],
+            identifier=SensorIdentifier(config['identifier']),
+            buttons=config['buttons'],
+        )
+    else:
+        raise Exception(f'Unknown sensor type \'{sensor_type}\'')
+
+
 def main():
     global sensors, ignored_sensors, mqttc
 
@@ -220,11 +266,7 @@ def main():
         config = yaml.safe_load(f)
 
     sensors = [
-        RadioSensor(
-            topic_prefix=sensor['topic_prefix'],
-            identifier=SensorIdentifier(sensor['identifier']),
-        )
-        for sensor in config['sensors']
+        build_sensor(sensor) for sensor in config['sensors']
     ]
 
     ignored_sensors = [
