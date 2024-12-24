@@ -130,8 +130,6 @@ class ButtonRadioSensor(RadioSensor):
                 topic = f'{self.topic_prefix}/{button}'
                 mqttc.publish(topic, 'pressed', qos=MQTT_QOS, retain=False)
 
-                send_discord_message(f':black_square_button: Button `{button}` got pressed on remote `{self.topic_prefix}`')
-
 
 mqttc: Optional[mqtt.Client] = None
 
