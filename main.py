@@ -136,8 +136,6 @@ mqttc: Optional[mqtt.Client] = None
 sensors: list[RadioSensor] = []
 ignored_sensors: list[SensorIdentifier] = []
 
-packet_receive_buffer = PacketTimeRingBuffer(max_age=5)
-
 
 def parse_rtl_433_packet(line: str) -> Optional[Packet]:
     try:
@@ -203,26 +201,17 @@ def is_ignored(packet: Packet) -> bool:
     return False
 
 
-def on_packet_receive(packet: Packet):
-    if is_ignored(packet) or packet_receive_buffer.contains_duplicate(packet):
-        return
-
-    packet_receive_buffer.add(packet)
-    process_packet(packet)
-
-
-def read_stderr(process, name):
+def read_stderr(process):
     while True:
         line = process.stderr.readline()
         if not line:
             break
 
-        print(f'{name}: {line.strip()}')
+        print(f'rtl_433: {line.strip()}')
 
 
-def read_stdout(process, name):
-    print(f'{name} reading packets.')
-    received_first = False
+def read_stdout(process):
+    previous_packets = PacketTimeRingBuffer(max_age=5)
 
     while True:
         line = process.stdout.readline()
@@ -231,14 +220,14 @@ def read_stdout(process, name):
 
         packet = parse_rtl_433_packet(line)
         if packet is None:
-            print(f'Error while parsing packet on receiver {name}: {line.strip()}')
+            print('Error while parsing packet: ' + line.strip())
             continue
 
-        if not received_first:
-            received_first = True
-            print(f'{name} successfully received its first packet.')
+        if is_ignored(packet) or previous_packets.contains_duplicate(packet):
+            continue
 
-        on_packet_receive(packet)
+        previous_packets.add(packet)
+        process_packet(packet)
 
 
 def build_sensor(config: dict):
@@ -296,8 +285,8 @@ def main():
     print(f'Running rtl_433 with arguments {" ".join(command_args[1:])}')
     process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-    threading.Thread(target=read_stderr, args=(process, 'rtl_433[0]',)).start()
-    threading.Thread(target=read_stdout, args=(process, 'rtl_433[0]',)).start()
+    threading.Thread(target=read_stderr, args=(process,)).start()
+    threading.Thread(target=read_stdout, args=(process,)).start()
 
 
 if __name__ == '__main__':
