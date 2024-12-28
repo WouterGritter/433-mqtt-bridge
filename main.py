@@ -92,20 +92,47 @@ class RadioSensor(ABC):
         pass
 
 
-class TemperatureRadioSensor(RadioSensor):
-    def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
+class GenericRadioSensor(RadioSensor):
+    def __init__(self, topic_prefix: str, identifier: SensorIdentifier, data_key_map: dict[str, str]):
         super().__init__(topic_prefix, identifier)
 
-    def process(self, packet: Packet) -> None:
-        data_key_map = {
-            'temperature': 'temperature_C',
-            'humidity': 'humidity',
-        }
+        self.data_key_map = data_key_map
 
-        data = {mqtt_attribute: packet.data[data_key] for mqtt_attribute, data_key in data_key_map.items() if data_key in packet.data}
+    def process(self, packet: Packet) -> None:
+        data = {mqtt_attribute: packet.data[data_key] for mqtt_attribute, data_key in self.data_key_map.items() if data_key in packet.data}
         for attribute, value in data.items():
             topic = f'{self.topic_prefix}/{attribute}'
             mqttc.publish(topic, value, qos=MQTT_QOS, retain=MQTT_RETAIN)
+
+
+class TemperatureRadioSensor(GenericRadioSensor):
+    def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
+        super().__init__(
+            topic_prefix,
+            identifier,
+            data_key_map={
+                'temperature': 'temperature_C',
+                'humidity': 'humidity',
+            },
+        )
+
+
+class WeatherStationRadioSensor(GenericRadioSensor):
+    def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
+        super().__init__(
+            topic_prefix,
+            identifier,
+            data_key_map={
+                'temperature': 'temperature_C',
+                'humidity': 'humidity',
+                'gustspeed': 'wind_max_m_s',
+                'windspeed': 'wind_avg_m_s',
+                'winddirection': 'wind_dir_deg',
+                'rain': 'rain_mm',
+                'light': 'light_lux',
+                'uv': 'uv',
+            },
+        )
 
 
 class ButtonRadioSensor(RadioSensor):
@@ -284,6 +311,11 @@ def build_sensor(config: dict):
     sensor_type = config.get('type', 'temperature')
     if sensor_type == 'temperature':
         return TemperatureRadioSensor(
+            topic_prefix=config['topic_prefix'],
+            identifier=SensorIdentifier(config['identifier']),
+        )
+    elif sensor_type == 'weather_station':
+        return WeatherStationRadioSensor(
             topic_prefix=config['topic_prefix'],
             identifier=SensorIdentifier(config['identifier']),
         )
