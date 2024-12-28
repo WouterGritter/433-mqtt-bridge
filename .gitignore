@@ -1,3 +1,4 @@
 .idea/
 .env
 sensors.yml
+receivers.yml
