@@ -146,6 +146,9 @@ class Receiver:
         if '-F json' not in command:
             command += ' -F json'
 
+        if '-C si' not in command:
+            command += ' -C si'
+
         for custom_decoder in custom_decoders:
             command += f' -X {custom_decoder}'
 
