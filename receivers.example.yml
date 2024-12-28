@@ -1,0 +1,6 @@
+receivers:
+  - name: local-433
+    arguments: '-d 1 -t digital_atc'
+
+custom_decoders:
+  - 'n=custombutton,m=OOK_PWM,s=364,l=1072,r=1084,g=0,t=283,y=0,bits=25'

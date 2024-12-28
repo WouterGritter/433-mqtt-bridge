@@ -5,7 +5,7 @@ import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
 from queue import Queue
-from typing import Optional
+from typing import Optional, Callable
 import yaml
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -13,8 +13,9 @@ from discord_webhook import DiscordWebhook
 
 load_dotenv()
 
+RECEIVERS_CONFIG_PATH = os.getenv('RECEIVERS_CONFIG_PATH', 'receivers.yml')
 SENSORS_CONFIG_PATH = os.getenv('SENSORS_CONFIG_PATH', 'sensors.yml')
-RTL_433_ARGS = os.getenv('RTL_433_ARGS', '')
+LEGACY_RTL_433_ARGS = os.getenv('RTL_433_ARGS')
 MQTT_BROKER_ADDRESS = os.getenv('MQTT_BROKER_ADDRESS', 'localhost')
 MQTT_BROKER_PORT = int(os.getenv('MQTT_BROKER_PORT', '1883'))
 MQTT_QOS = int(os.getenv('MQTT_QOS', '0'))
@@ -132,7 +133,66 @@ class ButtonRadioSensor(RadioSensor):
                 mqttc.publish(topic, 'pressed', qos=MQTT_QOS, retain=False)
 
 
+class Receiver:
+    def __init__(self, name: str, arguments: str):
+        self.name = name
+        self.arguments = arguments
+
+        self.process: Optional[subprocess.Popen] = None
+
+    def start(self):
+        command = f'rtl_433 {self.arguments}'
+
+        if '-F json' not in command:
+            command += ' -F json'
+
+        for custom_decoder in custom_decoders:
+            command += f' -X {custom_decoder}'
+
+        command_args = [arg.strip() for arg in command.split(' ') if arg.strip() != '']
+
+        print(f'Running rtl_433[{self.name}] with arguments {" ".join(command_args[1:])}')
+        self.process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        threading.Thread(target=self.read_stderr_worker).start()
+        threading.Thread(target=self.read_stdout_worker).start()
+
+    def read_stderr_worker(self):
+        while True:
+            line = self.process.stderr.readline()
+            if not line:
+                break
+
+            print(f'rtl_433[{self.name}]: {line.strip()}')
+
+    def read_stdout_worker(self):
+        print(f'rtl_433[{self.name}] is now reading packets.')
+        received_first = False
+
+        while True:
+            line = self.process.stdout.readline()
+            if not line:
+                break
+
+            packet = parse_rtl_433_packet(line)
+            if packet is None:
+                print(f'Error while parsing packet on receiver rtl_433[{self.name}]: {line.strip()}')
+                continue
+
+            if not received_first:
+                received_first = True
+                print(f'rtl_433[{self.name}] successfully received its first packet.')
+
+            packet_receive_queue.put(packet)
+
+        print(f'rtl_433[{self.name}] exited.')
+
+
 mqttc: Optional[mqtt.Client] = None
+
+custom_decoders: list[str] = []
+
+receivers: list[Receiver] = []
 
 sensors: list[RadioSensor] = []
 ignored_sensors: list[SensorIdentifier] = []
@@ -204,36 +264,6 @@ def is_ignored(packet: Packet) -> bool:
     return False
 
 
-def read_stderr(process, name):
-    while True:
-        line = process.stderr.readline()
-        if not line:
-            break
-
-        print(f'{name}: {line.strip()}')
-
-
-def read_stdout(process, name):
-    print(f'{name} reading packets.')
-    received_first = False
-
-    while True:
-        line = process.stdout.readline()
-        if not line:
-            break
-
-        packet = parse_rtl_433_packet(line)
-        if packet is None:
-            print(f'Error while parsing packet on receiver {name}: {line.strip()}')
-            continue
-
-        if not received_first:
-            received_first = True
-            print(f'{name} successfully received its first packet.')
-
-        packet_receive_queue.put(packet)
-
-
 def process_packet_worker():
     previous_packets = PacketTimeRingBuffer(max_age=5)
 
@@ -264,46 +294,62 @@ def build_sensor(config: dict):
         raise Exception(f'Unknown sensor type \'{sensor_type}\'')
 
 
+def load_sensors_config():
+    with open(SENSORS_CONFIG_PATH, 'r') as f:
+        config = yaml.safe_load(f)
+
+    for sensor in config['sensors']:
+        sensors.append(build_sensor(sensor))
+
+    for sensor_identifier in config['ignored_sensors']:
+        ignored_sensors.append(SensorIdentifier(sensor_identifier))
+
+
+def load_receivers_config():
+    with open(RECEIVERS_CONFIG_PATH, 'r') as f:
+        config = yaml.safe_load(f)
+
+    for custom_decoder in config['custom_decoders']:
+        custom_decoders.append(custom_decoder)
+
+    for receiver in config['receivers']:
+        receivers.append(Receiver(
+            name=receiver['name'],
+            arguments=receiver['arguments'],
+        ))
+
+
 def main():
-    global sensors, ignored_sensors, mqttc
+    global mqttc
 
     print(f'433-mqtt-bridge version {os.getenv("IMAGE_VERSION")}')
 
+    print(f'{RECEIVERS_CONFIG_PATH=}')
     print(f'{SENSORS_CONFIG_PATH=}')
-    print(f'{RTL_433_ARGS=}')
     print(f'{MQTT_BROKER_ADDRESS=}')
     print(f'{MQTT_BROKER_PORT=}')
     print(f'{MQTT_QOS=}')
     print(f'{MQTT_RETAIN=}')
     print(f'{DISCORD_WEBHOOK_URL=}')
 
-    with open(SENSORS_CONFIG_PATH, 'r') as f:
-        config = yaml.safe_load(f)
+    if LEGACY_RTL_433_ARGS is not None:
+        print(f'Legacy RTL_433_ARGS argument found, creating receiver with arguments \'{LEGACY_RTL_433_ARGS}\' and name \'env\'.')
+        receivers.append(Receiver(
+            name='env',
+            arguments=LEGACY_RTL_433_ARGS,
+        ))
 
-    sensors = [
-        build_sensor(sensor) for sensor in config['sensors']
-    ]
+    load_receivers_config()
+    load_sensors_config()
 
-    ignored_sensors = [
-        SensorIdentifier(sensor) for sensor in config['ignored_sensors']
-    ]
-
-    print(f'Loaded {len(sensors)} sensors and {len(ignored_sensors)} ignored sensors.')
+    print(f'Loaded {len(receivers)} receivers, {len(sensors)} sensors and {len(ignored_sensors)} ignored sensors.')
 
     mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     mqttc.connect(MQTT_BROKER_ADDRESS, MQTT_BROKER_PORT, 60)
     mqttc.loop_start()
 
-    command = f'rtl_433 {RTL_433_ARGS}'
-    if '-F json' not in command:
-        command += ' -F json'
-    command_args = [arg.strip() for arg in command.split(' ') if arg.strip() != '']
-
-    print(f'Running rtl_433 with arguments {" ".join(command_args[1:])}')
-    process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-    threading.Thread(target=read_stderr, args=(process, 'rtl_433[0]',)).start()
-    threading.Thread(target=read_stdout, args=(process, 'rtl_433[0]',)).start()
+    for receiver in receivers:
+        receiver.start()
 
     threading.Thread(target=process_packet_worker).start()
 
