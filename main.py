@@ -28,11 +28,12 @@ IGNORE_DATA_KEYS = [
 
 
 class Packet:
-    def __init__(self, data: dict[str, any], receive_time: datetime):
+    def __init__(self, data: dict[str, any], receive_time: datetime, receiver_name: str):
         self.data = data
         self.receive_time = receive_time
+        self.receiver_name = receiver_name
 
-    def is_duplicate(self, other: Optional['Packet'], max_time_delta: Optional[float] = None) -> bool:
+    def is_duplicate_data(self, other: Optional['Packet'], max_time_delta: Optional[float] = None) -> bool:
         if other is None:
             return False
 
@@ -61,7 +62,7 @@ class PacketTimeRingBuffer:
     def contains_duplicate(self, packet: Packet) -> bool:
         self.cleanup()
         for other in self.packets:
-            if packet.is_duplicate(other):
+            if packet.is_duplicate_data(other):
                 return True
 
         return False
@@ -204,7 +205,7 @@ class Receiver:
             if not line:
                 break
 
-            packet = parse_rtl_433_packet(line)
+            packet = parse_rtl_433_packet(line, self)
             if packet is None:
                 print(f'Error while parsing packet on receiver rtl_433[{self.name}]: {line.strip()}')
                 continue
@@ -230,7 +231,7 @@ ignored_sensors: list[SensorIdentifier] = []
 packet_receive_queue: Queue[Packet] = Queue()
 
 
-def parse_rtl_433_packet(line: str) -> Optional[Packet]:
+def parse_rtl_433_packet(line: str, receiver: Receiver) -> Optional[Packet]:
     try:
         data = json.loads(line)
     except json.JSONDecodeError:
@@ -245,24 +246,24 @@ def parse_rtl_433_packet(line: str) -> Optional[Packet]:
         if key in data:
             del data[key]
 
-    return Packet(data, receive_time)
+    return Packet(data, receive_time, receiver.name)
 
 
 def process_packet(packet: Packet):
     sensor = find_sensor(packet)
 
     if packet.data.get('button', 0) == 1:
-        print(f'Button pressed on {"unknown" if sensor is None else "known"} sensor: {json.dumps(packet.data)}')
-        discord_message = f'**Button pressed {"unknown" if sensor is None else "known"} on sensor** :bell:\n' + \
+        print(f'Button pressed on {"unknown" if sensor is None else "known"} sensor on rtl_433[{packet.receiver_name}]: {json.dumps(packet.data)}')
+        discord_message = f'**Button pressed {"unknown" if sensor is None else "known"} on sensor on rtl_433[{packet.receiver_name}]** :bell:\n' + \
                           '```json\n' + \
                           f'{json.dumps(packet.data, indent=2)}\n' + \
                           '```'
 
         send_discord_message(discord_message)
     elif sensor is None:
-        print(f'Received packet from unknown sensor: {json.dumps(packet.data)}')
+        print(f'Received packet from unknown sensor on rtl_433[{packet.receiver_name}]: {json.dumps(packet.data)}')
 
-        discord_message = '**Received 433 MHz data from unknown sensor/device** :open_mouth:\n' + \
+        discord_message = '**Received data from unknown sensor/device on rtl_433[{packet.receiver_name}]** :open_mouth:\n' + \
                           '```json\n' + \
                           f'{json.dumps(packet.data, indent=2)}\n' + \
                           '```'
