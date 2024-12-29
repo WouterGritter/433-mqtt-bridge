@@ -255,18 +255,18 @@ def process_packet(packet: Packet):
     if packet.data.get('button', 0) == 1:
         print(f'Button pressed on {"unknown" if sensor is None else "known"} sensor on rtl_433[{packet.receiver_name}]: {json.dumps(packet.data)}')
         discord_message = f'**Button pressed {"unknown" if sensor is None else "known"} on sensor on rtl_433[{packet.receiver_name}]** :bell:\n' + \
-                          '```json\n' + \
+                          f'```json\n' + \
                           f'{json.dumps(packet.data, indent=2)}\n' + \
-                          '```'
+                          f'```'
 
         send_discord_message(discord_message)
     elif sensor is None:
         print(f'Received packet from unknown sensor on rtl_433[{packet.receiver_name}]: {json.dumps(packet.data)}')
 
-        discord_message = '**Received data from unknown sensor/device on rtl_433[{packet.receiver_name}]** :open_mouth:\n' + \
-                          '```json\n' + \
+        discord_message = f'**Received data from unknown sensor/device on rtl_433[{packet.receiver_name}]** :open_mouth:\n' + \
+                          f'```json\n' + \
                           f'{json.dumps(packet.data, indent=2)}\n' + \
-                          '```'
+                          f'```'
 
         send_discord_message(discord_message)
 
