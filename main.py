@@ -28,10 +28,10 @@ IGNORE_DATA_KEYS = [
 
 
 class Packet:
-    def __init__(self, data: dict[str, any], receive_time: datetime, receiver_name: str):
+    def __init__(self, data: dict[str, any], receive_time: datetime, origin: 'Receiver'):
         self.data = data
         self.receive_time = receive_time
-        self.receiver_name = receiver_name
+        self.origin = origin
 
     def is_duplicate_data(self, other: Optional['Packet'], max_time_delta: Optional[float] = None) -> bool:
         if other is None:
@@ -253,17 +253,17 @@ def process_packet(packet: Packet):
     sensor = find_sensor(packet)
 
     if packet.data.get('button', 0) == 1:
-        print(f'Button pressed on {"unknown" if sensor is None else "known"} sensor on rtl_433[{packet.receiver_name}]: {json.dumps(packet.data)}')
-        discord_message = f'**Button pressed {"unknown" if sensor is None else "known"} on sensor on rtl_433[{packet.receiver_name}]** :bell:\n' + \
+        print(f'Button pressed on {"unknown" if sensor is None else "known"} sensor on rtl_433[{packet.origin.name}]: {json.dumps(packet.data)}')
+        discord_message = f'**Button pressed {"unknown" if sensor is None else "known"} on sensor on rtl_433[{packet.origin.name}]** :bell:\n' + \
                           f'```json\n' + \
                           f'{json.dumps(packet.data, indent=2)}\n' + \
                           f'```'
 
         send_discord_message(discord_message)
     elif sensor is None:
-        print(f'Received packet from unknown sensor on rtl_433[{packet.receiver_name}]: {json.dumps(packet.data)}')
+        print(f'Received packet from unknown sensor on rtl_433[{packet.origin.name}]: {json.dumps(packet.data)}')
 
-        discord_message = f'**Received data from unknown sensor/device on rtl_433[{packet.receiver_name}]** :open_mouth:\n' + \
+        discord_message = f'**Received data from unknown sensor/device on rtl_433[{packet.origin.name}]** :open_mouth:\n' + \
                           f'```json\n' + \
                           f'{json.dumps(packet.data, indent=2)}\n' + \
                           f'```'
@@ -300,6 +300,7 @@ def process_packet_worker():
 
     while True:
         packet = packet_receive_queue.get()
+        print(f'rtl_433[{packet.origin.name}] received {json.dumps(packet.data)}')
 
         if is_ignored(packet) or previous_packets.contains_duplicate(packet):
             continue
