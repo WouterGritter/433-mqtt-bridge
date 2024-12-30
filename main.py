@@ -246,7 +246,7 @@ def parse_rtl_433_packet(line: str, receiver: Receiver) -> Optional[Packet]:
         if key in data:
             del data[key]
 
-    return Packet(data, receive_time, receiver.name)
+    return Packet(data, receive_time, receiver)
 
 
 def process_packet(packet: Packet):
