@@ -276,7 +276,10 @@ def process_packet(packet: Packet):
 
 def send_discord_message(message: str):
     if DISCORD_WEBHOOK_URL is not None and DISCORD_WEBHOOK_URL != '':
-        DiscordWebhook(url=DISCORD_WEBHOOK_URL, content=message).execute()
+        try:
+            DiscordWebhook(url=DISCORD_WEBHOOK_URL, content=message).execute()
+        except Exception as e:
+            print(f'An error occurred while trying to send a discord message: {e}')
 
 
 def find_sensor(packet: Packet) -> Optional[RadioSensor]:
