@@ -303,7 +303,7 @@ def process_packet_worker():
 
     while True:
         packet = packet_receive_queue.get()
-        print(f'rtl_433[{packet.origin.name}] received {json.dumps(packet.data)}')
+        # print(f'rtl_433[{packet.origin.name}] received {json.dumps(packet.data)}')
 
         if is_ignored(packet) or previous_packets.contains_duplicate(packet):
             continue
