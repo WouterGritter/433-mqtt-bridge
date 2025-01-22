@@ -1,0 +1,14 @@
+[Unit]
+Description=433 MQTT Bridge Service
+After=network.target
+
+[Service]
+Type=simple
+User=wouter
+WorkingDirectory=/home/wouter/433-mqtt-bridge
+ExecStart=/usr/bin/python3 /home/wouter/433-mqtt-bridge/main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
