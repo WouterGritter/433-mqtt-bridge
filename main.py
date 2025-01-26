@@ -80,6 +80,44 @@ class SensorIdentifier:
         return True
 
 
+class CalculatedAttributes(ABC):
+
+    @abstractmethod
+    def generate_calculated_attributes(self, received_attributes: dict[str, any]) -> Optional[dict[str, any]]:
+        pass
+
+
+class RainRateCalculatedAttribute(CalculatedAttributes):
+
+    def __init__(self, time_window: float = 60 * 15):
+        self.time_window = time_window
+        self.rain_buffer: list[tuple[datetime, float]] = []
+
+    def generate_calculated_attributes(self, received_attributes: dict[str, any]) -> Optional[dict[str, any]]:
+        rain = received_attributes.get('rain')
+        if rain is None:
+            return None
+
+        self.clean_buffer()
+        self.rain_buffer.append((datetime.now(), rain))
+
+        last_rain = self.rain_buffer[0][1]
+        time_window_hr = self.time_window / 3600.0
+        rain_delta = rain - last_rain
+        rain_rate = rain_delta / time_window_hr
+
+        return {
+            'rain_rate': rain_rate,
+        }
+
+    def clean_buffer(self):
+        now = datetime.now()
+        for i in range(len(self.rain_buffer) - 1, -1, -1):
+            age = (now - self.rain_buffer[i][0]).total_seconds()
+            if age > self.time_window:
+                del self.rain_buffer[i]
+
+
 class RadioSensor(ABC):
     def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
         self.topic_prefix = topic_prefix
@@ -94,16 +132,25 @@ class RadioSensor(ABC):
 
 
 class GenericRadioSensor(RadioSensor):
-    def __init__(self, topic_prefix: str, identifier: SensorIdentifier, data_key_map: dict[str, str]):
+    def __init__(self, topic_prefix: str, identifier: SensorIdentifier, data_key_map: dict[str, str], calculated_attributes: Optional[list[CalculatedAttributes]] = None):
         super().__init__(topic_prefix, identifier)
 
         self.data_key_map = data_key_map
+        self.calculated_attributes = calculated_attributes
 
     def process(self, packet: Packet) -> None:
         data = {mqtt_attribute: packet.data[data_key] for mqtt_attribute, data_key in self.data_key_map.items() if data_key in packet.data}
         for attribute, value in data.items():
             topic = f'{self.topic_prefix}/{attribute}'
             mqttc.publish(topic, value, qos=MQTT_QOS, retain=MQTT_RETAIN)
+
+        if self.calculated_attributes is not None:
+            for attribute_calculator in self.calculated_attributes:
+                additional_data = attribute_calculator.generate_calculated_attributes(data)
+                if additional_data is not None:
+                    for attribute, value in additional_data.items():
+                        topic = f'{self.topic_prefix}/{attribute}'
+                        mqttc.publish(topic, value, qos=MQTT_QOS, retain=MQTT_RETAIN)
 
 
 class TemperatureRadioSensor(GenericRadioSensor):
@@ -133,6 +180,9 @@ class WeatherStationRadioSensor(GenericRadioSensor):
                 'light': 'light_lux',
                 'uv': 'uv',
             },
+            calculated_attributes=[
+                RainRateCalculatedAttribute()
+            ],
         )
 
 
