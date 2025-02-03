@@ -5,6 +5,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime
+from enum import Enum
 from queue import Queue
 from typing import Optional
 import yaml
@@ -33,6 +34,12 @@ class Packet:
         self.data = data
         self.receive_time = receive_time
         self.origin = origin
+
+    def get_raw_data(self) -> Optional[list[str]]:
+        if 'rows' not in self.data:
+            return None
+
+        return [row['data'] for row in self.data['rows']]
 
     def is_duplicate_data(self, other: Optional['Packet'], max_time_delta: Optional[float] = None) -> bool:
         if other is None:
@@ -197,19 +204,59 @@ class ButtonRadioSensor(RadioSensor):
         if not super().matches(packet):
             return False
 
-        codes = [row['data'] for row in packet.data['rows']]
-        for code in codes:
+        for code in packet.get_raw_data():
             if code in self.buttons.keys():
                 return True
         return False
 
     def process(self, packet: Packet) -> None:
-        codes = [row['data'] for row in packet.data['rows']]
-        for code in codes:
+        for code in packet.get_raw_data():
             button = self.buttons.get(code, None)
             if button is not None:
                 topic = f'{self.topic_prefix}/{button}'
                 mqttc.publish(topic, 'pressed', qos=MQTT_QOS, retain=False)
+
+
+class DoorState(Enum):
+    OPEN = ('open',)
+    CLOSE = ('close',)
+
+    def __init__(self, mqtt_name: str):
+        self.mqtt_name = mqtt_name
+
+
+class DoorRadioSensor(RadioSensor):
+    def __init__(self, topic: str, identifier: SensorIdentifier, door_open_code: str, door_close_code: str, ignore_repeats: bool):
+        super().__init__(topic, identifier)
+
+        self.topic = topic
+        self.door_open_code = door_open_code
+        self.door_close_code = door_close_code
+        self.ignore_repeats = ignore_repeats
+
+        self.current_door_state: Optional[DoorState] = None
+
+    def matches(self, packet: Packet) -> bool:
+        if not super().matches(packet):
+            return False
+
+        raw_data = packet.get_raw_data()
+        return self.door_open_code in raw_data or self.door_close_code in raw_data
+
+    def process(self, packet: Packet) -> None:
+        raw_data = packet.get_raw_data()
+        if self.door_open_code in raw_data:
+            door_state = DoorState.OPEN
+        elif self.door_close_code in raw_data:
+            door_state = DoorState.CLOSE
+        else:
+            return
+
+        if self.ignore_repeats and door_state == self.current_door_state:
+            return
+
+        self.current_door_state = door_state
+        mqttc.publish(self.topic, door_state.mqtt_name, qos=MQTT_QOS, retain=MQTT_RETAIN)
 
 
 class Receiver:
@@ -371,7 +418,6 @@ def process_packet_worker():
 
     while True:
         packet = packet_receive_queue.get()
-        # print(f'rtl_433[{packet.origin.name}] received {json.dumps(packet.data)}')
 
         if is_ignored(packet) or previous_packets.contains_duplicate(packet):
             continue
@@ -397,6 +443,14 @@ def build_sensor(config: dict):
             topic_prefix=config['topic_prefix'],
             identifier=SensorIdentifier(config['identifier']),
             buttons=config['buttons'],
+        )
+    elif sensor_type == 'door':
+        return DoorRadioSensor(
+            topic=config['topic'],
+            identifier=SensorIdentifier(config['identifier']),
+            door_open_code=config['door_open_code'],
+            door_close_code=config['door_close_code'],
+            ignore_repeats=config['ignore_repeats'],
         )
     else:
         raise Exception(f'Unknown sensor type \'{sensor_type}\'')

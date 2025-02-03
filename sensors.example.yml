@@ -19,6 +19,13 @@ sensors:
       00a08e8: 'b'
       00a0878: 'c'
       00a08d8: 'd'
+  - type: door
+    topic: 'misc/doorsensor'
+    identifier:
+      model: 'doorsensor'
+    door_open_code: '36cd598'
+    door_close_code: '36cd568'
+    ignore_repeats: true
 
 ignored_sensors:
   - model: 'KlikAanKlikUit-Switch'
