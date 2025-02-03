@@ -220,19 +220,19 @@ class ButtonRadioSensor(RadioSensor):
 
 class DoorState(Enum):
     OPEN = ('open',)
-    CLOSE = ('close',)
+    CLOSED = ('close',)
 
     def __init__(self, mqtt_name: str):
         self.mqtt_name = mqtt_name
 
 
 class DoorRadioSensor(RadioSensor):
-    def __init__(self, topic: str, identifier: SensorIdentifier, door_open_code: str, door_close_code: str, ignore_repeats: bool):
+    def __init__(self, topic: str, identifier: SensorIdentifier, door_open_code: str, door_closed_code: str, ignore_repeats: bool):
         super().__init__(topic, identifier)
 
         self.topic = topic
         self.door_open_code = door_open_code
-        self.door_close_code = door_close_code
+        self.door_closed_code = door_closed_code
         self.ignore_repeats = ignore_repeats
 
         self.current_door_state: Optional[DoorState] = None
@@ -242,14 +242,14 @@ class DoorRadioSensor(RadioSensor):
             return False
 
         raw_data = packet.get_raw_data()
-        return self.door_open_code in raw_data or self.door_close_code in raw_data
+        return self.door_open_code in raw_data or self.door_closed_code in raw_data
 
     def process(self, packet: Packet) -> None:
         raw_data = packet.get_raw_data()
         if self.door_open_code in raw_data:
             door_state = DoorState.OPEN
-        elif self.door_close_code in raw_data:
-            door_state = DoorState.CLOSE
+        elif self.door_closed_code in raw_data:
+            door_state = DoorState.CLOSED
         else:
             return
 
@@ -450,7 +450,7 @@ def build_sensor(config: dict):
             topic=config['topic'],
             identifier=SensorIdentifier(config['identifier']),
             door_open_code=config['door_open_code'],
-            door_close_code=config['door_close_code'],
+            door_closed_code=config['door_closed_code'],
             ignore_repeats=config['ignore_repeats'],
         )
     else:
