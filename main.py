@@ -2,10 +2,11 @@ import os
 import subprocess
 import json
 import threading
+import time
 from abc import ABC, abstractmethod
 from datetime import datetime
 from queue import Queue
-from typing import Optional, Callable
+from typing import Optional
 import yaml
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -216,8 +217,6 @@ class Receiver:
         self.name = name
         self.arguments = arguments
 
-        self.process: Optional[subprocess.Popen] = None
-
     def start(self):
         command = f'rtl_433 {self.arguments}'
 
@@ -232,26 +231,44 @@ class Receiver:
 
         command_args = [arg.strip() for arg in command.split(' ') if arg.strip() != '']
 
-        print(f'Running rtl_433[{self.name}] with arguments {" ".join(command_args[1:])}')
-        self.process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        threading.Thread(target=self.receiver_worker, args=(command_args,)).start()
 
-        threading.Thread(target=self.read_stderr_worker).start()
-        threading.Thread(target=self.read_stdout_worker).start()
-
-    def read_stderr_worker(self):
+    def receiver_worker(self, command_args: list[str]):
         while True:
-            line = self.process.stderr.readline()
+            print(f'Running rtl_433[{self.name}] with arguments {" ".join(command_args[1:])}')
+            process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            stderr_worker_thread = threading.Thread(target=self.read_stderr_worker, args=(process,))
+            stdout_worker_thread = threading.Thread(target=self.read_stdout_worker, args=(process,))
+
+            stderr_worker_thread.start()
+            stdout_worker_thread.start()
+
+            stderr_worker_thread.join()
+            stdout_worker_thread.join()
+
+            exit_code = process.wait()
+
+            message = f'rtl_433[{self.name}] exited with code {exit_code}. Restarting rtl_433 command in a couple seconds.'
+            send_discord_message(message)
+            print(message)
+
+            time.sleep(5.0)
+
+    def read_stderr_worker(self, process: subprocess.Popen):
+        while True:
+            line = process.stderr.readline()
             if not line:
                 break
 
             print(f'rtl_433[{self.name}]: {line.strip()}')
 
-    def read_stdout_worker(self):
+    def read_stdout_worker(self, process: subprocess.Popen):
         print(f'rtl_433[{self.name}] is now reading packets.')
         received_first = False
 
         while True:
-            line = self.process.stdout.readline()
+            line = process.stdout.readline()
             if not line:
                 break
 
@@ -262,11 +279,12 @@ class Receiver:
 
             if not received_first:
                 received_first = True
-                print(f'rtl_433[{self.name}] successfully received its first packet.')
+
+                message = f'rtl_433[{self.name}] successfully received its first packet.'
+                send_discord_message(message)
+                print(message)
 
             packet_receive_queue.put(packet)
-
-        print(f'rtl_433[{self.name}] exited.')
 
 
 mqttc: Optional[mqtt.Client] = None
@@ -304,7 +322,7 @@ def process_packet(packet: Packet):
 
     if packet.data.get('button', 0) == 1:
         print(f'Button pressed on {"unknown" if sensor is None else "known"} sensor on rtl_433[{packet.origin.name}]: {json.dumps(packet.data)}')
-        discord_message = f'**Button pressed {"unknown" if sensor is None else "known"} on sensor on rtl_433[{packet.origin.name}]** :bell:\n' + \
+        discord_message = f'**Button pressed on {"unknown" if sensor is None else "known"} sensor on rtl_433[{packet.origin.name}]** :bell:\n' + \
                           f'```json\n' + \
                           f'{json.dumps(packet.data, indent=2)}\n' + \
                           f'```'
