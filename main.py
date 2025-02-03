@@ -18,6 +18,7 @@ load_dotenv()
 RECEIVERS_CONFIG_PATH = os.getenv('RECEIVERS_CONFIG_PATH', 'receivers.yml')
 SENSORS_CONFIG_PATH = os.getenv('SENSORS_CONFIG_PATH', 'sensors.yml')
 LEGACY_RTL_433_ARGS = os.getenv('RTL_433_ARGS')
+IGNORE_DUPLICATE_PACKETS_TIMEFRAME = float(os.getenv('IGNORE_DUPLICATE_PACKETS_TIMEFRAME', '3'))
 MQTT_BROKER_ADDRESS = os.getenv('MQTT_BROKER_ADDRESS', 'localhost')
 MQTT_BROKER_PORT = int(os.getenv('MQTT_BROKER_PORT', '1883'))
 MQTT_QOS = int(os.getenv('MQTT_QOS', '0'))
@@ -414,7 +415,7 @@ def is_ignored(packet: Packet) -> bool:
 
 
 def process_packet_worker():
-    previous_packets = PacketTimeRingBuffer(max_age=5)
+    previous_packets = PacketTimeRingBuffer(max_age=IGNORE_DUPLICATE_PACKETS_TIMEFRAME)
 
     while True:
         packet = packet_receive_queue.get()
@@ -488,6 +489,7 @@ def main():
 
     print(f'{RECEIVERS_CONFIG_PATH=}')
     print(f'{SENSORS_CONFIG_PATH=}')
+    print(f'{IGNORE_DUPLICATE_PACKETS_TIMEFRAME=}')
     print(f'{MQTT_BROKER_ADDRESS=}')
     print(f'{MQTT_BROKER_PORT=}')
     print(f'{MQTT_QOS=}')
