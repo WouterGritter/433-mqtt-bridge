@@ -220,7 +220,7 @@ class ButtonRadioSensor(RadioSensor):
 
 class DoorState(Enum):
     OPEN = ('open',)
-    CLOSED = ('close',)
+    CLOSED = ('closed',)
 
     def __init__(self, mqtt_name: str):
         self.mqtt_name = mqtt_name
