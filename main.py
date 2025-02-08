@@ -368,8 +368,12 @@ def parse_rtl_433_packet(line: str, receiver: Receiver) -> Optional[Packet]:
 def process_packet(packet: Packet):
     sensor = find_sensor(packet)
 
+    if sensor is None and is_ignored(packet):
+        return
+
     if packet.data.get('button', 0) == 1:
         print(f'Button pressed on {"unknown" if sensor is None else "known"} sensor on rtl_433[{packet.origin.name}]: {json.dumps(packet.data)}')
+
         discord_message = f'**Button pressed on {"unknown" if sensor is None else "known"} sensor on rtl_433[{packet.origin.name}]** :bell:\n' + \
                           f'```json\n' + \
                           f'{json.dumps(packet.data, indent=2)}\n' + \
@@ -420,7 +424,7 @@ def process_packet_worker():
     while True:
         packet = packet_receive_queue.get()
 
-        if is_ignored(packet) or previous_packets.contains_duplicate(packet):
+        if previous_packets.contains_duplicate(packet):
             continue
 
         previous_packets.add(packet)
