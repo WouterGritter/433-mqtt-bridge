@@ -297,11 +297,11 @@ class Receiver:
 
             exit_code = process.wait()
 
-            message = f'rtl_433[{self.name}] exited with code {exit_code}. Restarting rtl_433 command in a couple seconds.'
+            message = f'rtl_433[{self.name}] exited with code {exit_code}. Restarting rtl_433 command after a delay.'
             send_discord_message(message)
             print(message)
 
-            time.sleep(5.0)
+            time.sleep(30.0)
 
     def read_stderr_worker(self, process: subprocess.Popen):
         while True:
