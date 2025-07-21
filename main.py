@@ -218,6 +218,18 @@ class ButtonRadioSensor(RadioSensor):
                 mqttc.publish(topic, 'pressed', qos=MQTT_QOS, retain=False)
 
 
+class LightningRadioSensor(GenericRadioSensor):
+    def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
+        super().__init__(
+            topic_prefix,
+            identifier,
+            data_key_map={
+                'distance': 'storm_dist_km',
+                'count': 'strike_count',
+            },
+        )
+
+
 class DoorState(Enum):
     OPEN = ('open',)
     CLOSED = ('closed',)
@@ -456,6 +468,11 @@ def build_sensor(config: dict):
             door_open_code=config['door_open_code'],
             door_closed_code=config['door_closed_code'],
             ignore_repeats=config['ignore_repeats'],
+        )
+    elif sensor_type == 'lightning':
+        return LightningRadioSensor(
+            topic_prefix=config['topic_prefix'],
+            identifier=SensorIdentifier(config['identifier']),
         )
     else:
         raise Exception(f'Unknown sensor type \'{sensor_type}\'')
