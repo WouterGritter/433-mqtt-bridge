@@ -244,6 +244,8 @@ class LightningRadioSensor(RadioSensor):
         storm_dist_km = int(packet.data['storm_dist_km'])
         mqttc.publish(self.topic, str(storm_dist_km), qos=MQTT_QOS, retain=False)
 
+        self.last_strike_count = strike_count
+
 
 class DoorState(Enum):
     OPEN = ('open',)
