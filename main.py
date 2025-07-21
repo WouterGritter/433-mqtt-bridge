@@ -218,16 +218,31 @@ class ButtonRadioSensor(RadioSensor):
                 mqttc.publish(topic, 'pressed', qos=MQTT_QOS, retain=False)
 
 
-class LightningRadioSensor(GenericRadioSensor):
-    def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
-        super().__init__(
-            topic_prefix,
-            identifier,
-            data_key_map={
-                'distance': 'storm_dist_km',
-                'count': 'strike_count',
-            },
-        )
+class LightningRadioSensor(RadioSensor):
+    def __init__(self, topic: str, identifier: SensorIdentifier):
+        super().__init__(topic, identifier)
+
+        self.topic = topic
+        self.last_strike_count: Optional[int] = None
+
+    def process(self, packet: Packet) -> None:
+        strike_count = int(packet.data['strike_count'])
+        if self.last_strike_count is None:
+            # First time we hear this sensor. Assume it isn't a lightning strike and record `strike_count`.
+            self.last_strike_count = strike_count
+            return
+
+        if strike_count == self.last_strike_count:
+            # Ignore when `strike_count` didn't change.
+            return
+
+        if strike_count == 0:
+            # Ignore when `strike_count` is 0. This means the sensor got reset whilst we did receive a previously higher `strike_count`.
+            self.last_strike_count = strike_count
+            return
+
+        storm_dist_km = int(packet.data['storm_dist_km'])
+        mqttc.publish(self.topic, str(storm_dist_km), qos=MQTT_QOS, retain=False)
 
 
 class DoorState(Enum):
@@ -471,7 +486,7 @@ def build_sensor(config: dict):
         )
     elif sensor_type == 'lightning':
         return LightningRadioSensor(
-            topic_prefix=config['topic_prefix'],
+            topic=config['topic'],
             identifier=SensorIdentifier(config['identifier']),
         )
     else:

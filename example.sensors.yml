@@ -27,7 +27,7 @@ sensors:
     door_closed_code: '36cd568'
     ignore_repeats: true
   - type: lightning
-    topic_prefix: 'outdoor/lightning'
+    topic: 'outdoor/lightning'
     identifier:
       model: 'Bresser-Lightning'
       id: 46193
