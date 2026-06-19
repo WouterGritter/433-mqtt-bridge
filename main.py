@@ -174,6 +174,18 @@ class TemperatureRadioSensor(GenericRadioSensor):
         )
 
 
+class TPMSRadioSensor(GenericRadioSensor):
+    def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
+        super().__init__(
+            topic_prefix,
+            identifier,
+            data_key_map={
+                'pressure': 'pressure_kPa',
+                'temperature': 'temperature_C',
+            },
+        )
+
+
 class WeatherStationRadioSensor(GenericRadioSensor):
     def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
         super().__init__(
@@ -464,6 +476,11 @@ def build_sensor(config: dict):
     sensor_type = config.get('type', 'temperature')
     if sensor_type == 'temperature':
         return TemperatureRadioSensor(
+            topic_prefix=config['topic_prefix'],
+            identifier=SensorIdentifier(config['identifier']),
+        )
+    elif sensor_type == 'tpms':
+        return TPMSRadioSensor(
             topic_prefix=config['topic_prefix'],
             identifier=SensorIdentifier(config['identifier']),
         )

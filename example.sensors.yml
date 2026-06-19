@@ -31,6 +31,11 @@ sensors:
     identifier:
       model: 'Bresser-Lightning'
       id: 46193
+  - type: tpms
+    topic_prefix: 'car/frontleft'
+    identifier:
+      model: 'Schrader-EG53MA4'
+      id: 'DB834A'
 
 ignored_sensors:
   - model: 'KlikAanKlikUit-Switch'
