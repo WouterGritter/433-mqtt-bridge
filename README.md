@@ -15,6 +15,8 @@ devices are reported to Discord so they can be identified and added.
 - Supports custom `rtl_433` decoders (e.g. for cheap buttons and door sensors).
 - Reports packets from unknown devices (and ignores ones you don't care about) via a
   Discord webhook.
+- Serves a small web interface to **re-claim** an unknown sensor as an existing one —
+  handy for sensors whose `id` changes on every battery swap (see below).
 
 ## Requirements
 
@@ -41,6 +43,9 @@ The bridge is configured through a `.env` file and two YAML files. See `.env.exa
 | `MQTT_QOS` | `0` | QoS used when publishing |
 | `MQTT_RETAIN` | `false` | Retain published messages |
 | `DISCORD_WEBHOOK_URL` | _(none)_ | Webhook for unknown-device / status alerts |
+| `BASE_URL` | _(none)_ | Public URL of the web interface (behind your reverse proxy); enables the "claim" links in Discord |
+| `WEB_HOST` | `0.0.0.0` | Address the web interface binds to |
+| `WEB_PORT` | `8000` | Port the web interface binds to |
 | `RECEIVERS_CONFIG_PATH` | `receivers.yml` | Path to the receivers config |
 | `SENSORS_CONFIG_PATH` | `sensors.yml` | Path to the sensors config |
 | `IGNORE_DUPLICATE_PACKETS_TIMEFRAME` | `3` | Seconds within which identical packets are dropped |
@@ -78,6 +83,25 @@ sensors:
 ignored_sensors:
   - model: 'Nexa-Security'
 ```
+
+## Web interface & claiming sensors
+
+The bridge serves a small web interface (FastAPI) on `WEB_HOST:WEB_PORT`. Its first
+feature solves a specific annoyance: sensors that include an `id` field get a **new
+`id` every time you swap their batteries**, which otherwise means editing
+`sensors.yml` and restarting.
+
+When an unknown device with an `id` is seen, the Discord alert now includes a
+**"Claim this sensor"** link (requires `BASE_URL` to be set). Opening it shows the
+unknown packet and a dropdown of configured sensors whose identifier matches on
+everything *except* `id` (e.g. same `model` and `channel`). Picking one updates that
+sensor's `id` — written to `sensors.yml` **and** applied to the running process
+immediately, so no restart is needed. Devices without an `id` (buttons, door sensors)
+use stable raw codes and are unaffected.
+
+> This is the seed of a planned dashboard (add/remove/modify sensors & receivers,
+> stats). For now it only handles claiming. Note the interface is unauthenticated —
+> run it behind your reverse proxy, not exposed directly.
 
 ## Running
 

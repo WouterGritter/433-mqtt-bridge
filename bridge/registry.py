@@ -37,6 +37,36 @@ def is_ignored(packet: Packet) -> bool:
     return False
 
 
+def find_claim_candidates(packet_data: dict[str, any]) -> list[tuple[int, RadioSensor]]:
+    """Configured sensors this packet could be claimed as: those with an `id` in their
+    identifier whose every other identifier field (e.g. `model`, `channel`) matches the
+    packet. The returned index is the sensor's position in both `sensors` and the
+    `sensors.yml` `sensors:` list (they are loaded in lockstep)."""
+    candidates = []
+    for index, sensor in enumerate(sensors):
+        identifier = sensor.identifier.identifier
+        if 'id' not in identifier:
+            continue
+        if all(packet_data.get(key) == value for key, value in identifier.items() if key != 'id'):
+            candidates.append((index, sensor))
+
+    return candidates
+
+
+def claim_sensor(index: int, new_id: any) -> None:
+    """Re-point the configured sensor at `index` to `new_id`: persist it to sensors.yml
+    and update the live sensor in place (no restart, runtime state preserved)."""
+    with open(SENSORS_CONFIG_PATH, 'r') as f:
+        config = yaml.safe_load(f)
+
+    config['sensors'][index]['identifier']['id'] = new_id
+
+    with open(SENSORS_CONFIG_PATH, 'w') as f:
+        yaml.safe_dump(config, f, sort_keys=False)
+
+    sensors[index].identifier.identifier['id'] = new_id
+
+
 def load_sensors_config():
     with open(SENSORS_CONFIG_PATH, 'r') as f:
         config = yaml.safe_load(f)

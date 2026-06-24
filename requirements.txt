@@ -2,3 +2,7 @@ paho-mqtt
 pyyaml
 python-dotenv
 discord-webhook
+fastapi
+uvicorn
+python-multipart
+jinja2

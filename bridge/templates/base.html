@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ title }}{% endblock %} — 433-mqtt-bridge</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; overflow: auto; }
+    select, button { font-size: 1rem; padding: .4rem; margin-top: .5rem; }
+    button { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>{% block heading %}{{ title }}{% endblock %}</h1>
+  {% block content %}{% endblock %}
+</body>
+</html>

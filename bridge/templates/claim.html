@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+  <p>Received from an unknown sensor:</p>
+  <pre>{{ packet_json }}</pre>
+  {% if candidates %}
+    <p>Claim it as an existing sensor (its <code>id</code> will be set to <code>{{ new_id }}</code>):</p>
+    <form method="post" action="/claim">
+      <input type="hidden" name="packet" value="{{ packet }}">
+      <select name="sensor_index">
+        {% for candidate in candidates %}
+        <option value="{{ candidate.index }}">{{ candidate.label }} (last seen {{ candidate.last_seen }})</option>
+        {% endfor %}
+      </select>
+      <br>
+      <button type="submit">Claim sensor</button>
+    </form>
+  {% else %}
+    <p>No configured sensor matches this device (other than its <code>id</code>).
+       Add it to <code>sensors.yml</code> manually.</p>
+  {% endif %}
+{% endblock %}

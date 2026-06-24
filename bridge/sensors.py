@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from enum import Enum
 from typing import Optional
 
@@ -23,6 +24,8 @@ class RadioSensor(ABC):
     def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
         self.topic_prefix = topic_prefix
         self.identifier = identifier
+        # Time of the last packet matched to this sensor (not persisted across restarts).
+        self.last_seen: Optional[datetime] = None
 
     def matches(self, packet: Packet) -> bool:
         return self.identifier.matches(packet)

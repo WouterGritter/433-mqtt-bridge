@@ -13,6 +13,9 @@ MQTT_BROKER_PORT = int(os.getenv('MQTT_BROKER_PORT', '1883'))
 MQTT_QOS = int(os.getenv('MQTT_QOS', '0'))
 MQTT_RETAIN = os.getenv('MQTT_RETAIN', 'false') == 'true'
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
+BASE_URL = os.getenv('BASE_URL', '').rstrip('/')
+WEB_HOST = os.getenv('WEB_HOST', '0.0.0.0')
+WEB_PORT = int(os.getenv('WEB_PORT', '8000'))
 
 IGNORE_DATA_KEYS = [
     'repeat',

@@ -1,9 +1,19 @@
 import json
 
 from . import registry
-from .config import IGNORE_DUPLICATE_PACKETS_TIMEFRAME
-from .notifications import send_discord_message
+from .config import BASE_URL, IGNORE_DUPLICATE_PACKETS_TIMEFRAME
+from .notifications import build_claim_url, send_discord_message
 from .packet import Packet, PacketTimeRingBuffer
+
+
+def with_claim_link(message: str, packet: Packet) -> str:
+    """Append a 'claim' link to a Discord message when the packet carries an `id`.
+    Sensors that carry an `id` get a new one on every battery swap, so this offers a
+    way to re-claim the packet as an existing configured sensor (buttons/doors that only
+    send raw codes have no `id` and are left untouched)."""
+    if BASE_URL and 'id' in packet.data:
+        return message + f'\n:link: [Claim this sensor]({build_claim_url(packet.data)})'
+    return message
 
 
 def process_packet(packet: Packet):
@@ -20,7 +30,7 @@ def process_packet(packet: Packet):
                           f'{json.dumps(packet.data, indent=2)}\n' + \
                           f'```'
 
-        send_discord_message(discord_message)
+        send_discord_message(with_claim_link(discord_message, packet))
     elif sensor is None:
         print(f'Received packet from unknown sensor on rtl_433[{packet.origin.name}]: {json.dumps(packet.data)}')
 
@@ -29,9 +39,10 @@ def process_packet(packet: Packet):
                           f'{json.dumps(packet.data, indent=2)}\n' + \
                           f'```'
 
-        send_discord_message(discord_message)
+        send_discord_message(with_claim_link(discord_message, packet))
 
     if sensor is not None:
+        sensor.last_seen = packet.receive_time
         sensor.process(packet)
 
 
