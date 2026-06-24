@@ -4,5 +4,6 @@ python-dotenv
 discord-webhook
 fastapi
 uvicorn
+websockets
 python-multipart
 jinja2

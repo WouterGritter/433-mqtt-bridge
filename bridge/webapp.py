@@ -6,12 +6,16 @@ from datetime import datetime
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import events
+from . import mqtt_client
 from . import registry
+from . import stats
+from . import storage
 from .config import WEB_HOST, WEB_PORT
 
 
@@ -25,6 +29,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title='433-mqtt-bridge', lifespan=lifespan)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / 'templates'))
+app.mount('/static', StaticFiles(directory=str(Path(__file__).parent / 'static')), name='static')
 
 
 def _decode_packet(encoded: str) -> dict[str, any]:
@@ -116,6 +121,97 @@ def claim_post(request: Request, packet: str = Form(...), sensor_index: int = Fo
         'old_id': old_id,
         'new_id': new_id,
     })
+
+
+# --- Dashboard ------------------------------------------------------------
+
+def _sensor_list() -> list[dict[str, any]]:
+    """Configured sensors paired with their live stats (None until first seen)."""
+    with registry.lock:
+        return [
+            {
+                'key': sensor.topic_prefix,
+                'type': sensor.type_name,
+                'identifier': dict(sensor.identifier.identifier),
+                'stats': stats.sensor_snapshot(sensor.topic_prefix),
+            }
+            for sensor in registry.sensors
+        ]
+
+
+def _receiver_list() -> list[dict[str, any]]:
+    """Configured receivers paired with their live stats."""
+    snapshots = stats.all_receiver_snapshots()
+    return [
+        {'name': receiver.name, 'arguments': receiver.arguments, **snapshots.get(receiver.name, {})}
+        for receiver in registry.receivers
+    ]
+
+
+@app.get('/', response_class=HTMLResponse)
+def dashboard(request: Request):
+    return templates.TemplateResponse(request, 'dashboard.html', {'title': 'Dashboard'})
+
+
+@app.get('/api/sensors')
+def api_sensors():
+    return _sensor_list()
+
+
+@app.get('/api/receivers')
+def api_receivers():
+    return _receiver_list()
+
+
+@app.get('/api/unknowns')
+def api_unknowns():
+    return registry.list_recent_unknowns()
+
+
+@app.get('/api/status')
+def api_status():
+    return {'mqtt': mqtt_client.status()}
+
+
+@app.get('/api/sensors/history')
+def api_sensor_history(key: str, since: float = 0.0):
+    """Reading history for one sensor since a unix timestamp, for the sparklines."""
+    return storage.query_history(key, since)
+
+
+@app.post('/api/receivers/{name}/restart')
+def api_restart_receiver(name: str):
+    for receiver in registry.receivers:
+        if receiver.name == name:
+            return {'restarted': receiver.restart()}
+    return JSONResponse({'error': 'No such receiver'}, status_code=404)
+
+
+@app.websocket('/ws')
+async def ws(websocket: WebSocket):
+    """Stream live events (packet/reading/unknown/receiver_status) to the dashboard."""
+    await websocket.accept()
+    queue = events.subscribe()
+
+    # Reading from the socket lets us notice a client disconnect promptly even while the
+    # event stream is idle (we otherwise only ever write).
+    async def watch_disconnect():
+        try:
+            while True:
+                await websocket.receive_text()
+        except Exception:
+            pass
+
+    watcher = asyncio.create_task(watch_disconnect())
+    try:
+        while True:
+            event = await queue.get()
+            await websocket.send_json(event)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        watcher.cancel()
+        events.unsubscribe(queue)
 
 
 def run():

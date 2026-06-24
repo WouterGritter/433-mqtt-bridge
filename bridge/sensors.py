@@ -32,6 +32,9 @@ class SensorIdentifier:
 
 
 class RadioSensor(ABC):
+    # The `type` string this class corresponds to in sensors.yml (see build_sensor).
+    type_name: str = 'unknown'
+
     def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
         self.topic_prefix = topic_prefix
         self.identifier = identifier
@@ -67,6 +70,8 @@ class GenericRadioSensor(RadioSensor):
 
 
 class TemperatureRadioSensor(GenericRadioSensor):
+    type_name = 'temperature'
+
     def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
         super().__init__(
             topic_prefix,
@@ -79,6 +84,8 @@ class TemperatureRadioSensor(GenericRadioSensor):
 
 
 class TPMSRadioSensor(GenericRadioSensor):
+    type_name = 'tpms'
+
     def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
         super().__init__(
             topic_prefix,
@@ -91,6 +98,8 @@ class TPMSRadioSensor(GenericRadioSensor):
 
 
 class WeatherStationRadioSensor(GenericRadioSensor):
+    type_name = 'weather_station'
+
     def __init__(self, topic_prefix: str, identifier: SensorIdentifier):
         super().__init__(
             topic_prefix,
@@ -112,6 +121,8 @@ class WeatherStationRadioSensor(GenericRadioSensor):
 
 
 class ButtonRadioSensor(RadioSensor):
+    type_name = 'button'
+
     def __init__(self, topic_prefix: str, identifier: SensorIdentifier, buttons: dict[str, str]):
         super().__init__(topic_prefix, identifier)
 
@@ -136,6 +147,8 @@ class ButtonRadioSensor(RadioSensor):
 
 
 class LightningRadioSensor(RadioSensor):
+    type_name = 'lightning'
+
     def __init__(self, topic: str, identifier: SensorIdentifier):
         super().__init__(topic, identifier)
 
@@ -173,6 +186,8 @@ class DoorState(Enum):
 
 
 class DoorRadioSensor(RadioSensor):
+    type_name = 'door'
+
     def __init__(self, topic: str, identifier: SensorIdentifier, door_open_code: str, door_closed_code: str, ignore_repeats: bool):
         super().__init__(topic, identifier)
 

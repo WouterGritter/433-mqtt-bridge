@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard — 433-mqtt-bridge</title>
+  <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+  <header>
+    <h1>433-mqtt-bridge</h1>
+    <div class="status-bar">
+      <span id="ws-status" class="pill pill-bad">WebSocket: connecting…</span>
+      <span id="mqtt-status" class="pill pill-bad">MQTT: …</span>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Receivers</h2>
+      <div id="receivers" class="grid"></div>
+    </section>
+
+    <section>
+      <h2>Sensors</h2>
+      <div id="sensors" class="grid"></div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Raw feed</h2>
+        <div class="feed-controls">
+          <input id="feed-filter" type="text" placeholder="Filter (substring)…">
+          <label><input type="checkbox" id="feed-pause"> pause</label>
+          <button id="feed-clear" type="button">clear</button>
+        </div>
+      </div>
+      <div id="feed" class="feed"></div>
+    </section>
+  </main>
+
+  <script src="/static/vendor/uPlot.iife.min.js"></script>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
