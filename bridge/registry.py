@@ -1,4 +1,6 @@
 import threading
+import time
+import uuid
 from collections import OrderedDict
 from queue import Queue
 from typing import Any, Optional, TYPE_CHECKING
@@ -109,15 +111,147 @@ def claim_sensor(index: int, new_id: any) -> None:
     """Re-point the configured sensor at `index` to `new_id`: persist it to sensors.yml
     and update the live sensor in place (no restart, runtime state preserved)."""
     with lock:
-        with open(SENSORS_CONFIG_PATH, 'r') as f:
-            config = yaml.safe_load(f)
-
+        config = _read_sensors_config()
         config['sensors'][index]['identifier']['id'] = new_id
-
-        with open(SENSORS_CONFIG_PATH, 'w') as f:
-            yaml.safe_dump(config, f, sort_keys=False)
-
+        _write_sensors_config(config)
         sensors[index].identifier.identifier['id'] = new_id
+
+
+# --- sensors.yml CRUD ------------------------------------------------------
+#
+# `sensors` and `ignored_sensors` are kept index-aligned with the `sensors:` /
+# `ignored_sensors:` lists in sensors.yml (claim_sensor / find_claim_candidates rely on
+# this), so every mutation updates both the YAML file and the in-memory list at the same
+# index, under `lock`.
+
+def _read_sensors_config() -> dict:
+    with open(SENSORS_CONFIG_PATH, 'r') as f:
+        config = yaml.safe_load(f) or {}
+    config.setdefault('sensors', [])
+    config.setdefault('ignored_sensors', [])
+    return config
+
+
+def _write_sensors_config(config: dict) -> None:
+    with open(SENSORS_CONFIG_PATH, 'w') as f:
+        yaml.safe_dump(config, f, sort_keys=False)
+
+
+def add_sensor(sensor_config: dict) -> str:
+    """Validate and append a sensor. Returns the new sensor's key (topic_prefix)."""
+    new_sensor = build_sensor(sensor_config)  # raises on invalid config
+    with lock:
+        config = _read_sensors_config()
+        config['sensors'].append(sensor_config)
+        _write_sensors_config(config)
+        sensors.append(new_sensor)
+    return new_sensor.topic_prefix
+
+
+def update_sensor(index: int, sensor_config: dict) -> tuple[str, str]:
+    """Validate and replace the sensor at `index`. Returns (old_key, new_key). Runtime
+    state (last_seen) is carried over when the topic is unchanged."""
+    new_sensor = build_sensor(sensor_config)  # raises on invalid config
+    with lock:
+        config = _read_sensors_config()
+        if not 0 <= index < len(config['sensors']):
+            raise IndexError('sensor index out of range')
+        old_sensor = sensors[index]
+        if old_sensor.topic_prefix == new_sensor.topic_prefix:
+            new_sensor.last_seen = old_sensor.last_seen
+        config['sensors'][index] = sensor_config
+        _write_sensors_config(config)
+        sensors[index] = new_sensor
+    return old_sensor.topic_prefix, new_sensor.topic_prefix
+
+
+def remove_sensor(index: int) -> str:
+    """Remove the sensor at `index`. Returns the removed sensor's key."""
+    with lock:
+        config = _read_sensors_config()
+        if not 0 <= index < len(config['sensors']):
+            raise IndexError('sensor index out of range')
+        del config['sensors'][index]
+        _write_sensors_config(config)
+        removed = sensors.pop(index)
+    return removed.topic_prefix
+
+
+def add_ignored_sensor(identifier: dict) -> None:
+    with lock:
+        config = _read_sensors_config()
+        config['ignored_sensors'].append(identifier)
+        _write_sensors_config(config)
+        ignored_sensors.append(SensorIdentifier(identifier))
+
+
+def remove_ignored_sensor(index: int) -> None:
+    with lock:
+        config = _read_sensors_config()
+        if not 0 <= index < len(config['ignored_sensors']):
+            raise IndexError('ignored sensor index out of range')
+        del config['ignored_sensors'][index]
+        _write_sensors_config(config)
+        del ignored_sensors[index]
+
+
+def list_ignored_sensors() -> list[dict[str, Any]]:
+    with lock:
+        return [dict(ignored.identifier) for ignored in ignored_sensors]
+
+
+def get_sensor_configs() -> list[dict]:
+    """The raw `sensors:` entries from sensors.yml, index-aligned with `sensors`. Used to
+    prefill the dashboard's edit form with the full original config."""
+    with lock:
+        return _read_sensors_config()['sensors']
+
+
+# --- test sensors ----------------------------------------------------------
+#
+# Ephemeral, in-memory-only sensors used to try out a candidate config against live
+# traffic. They are matched against every packet and their parsed output is emitted to
+# the dashboard, but they are never published to MQTT, never persisted, and never added
+# to `sensors`. Each carries a TTL so abandoned test sessions self-clean.
+
+TEST_SENSOR_TTL = 600.0
+
+_test_sensors: dict[str, dict[str, Any]] = {}
+_test_lock = threading.Lock()
+
+
+def add_test_sensor(sensor_config: dict) -> dict[str, Any]:
+    """Validate and register a test sensor. Returns {id, expires_at}."""
+    sensor = build_sensor(sensor_config)  # raises on invalid config
+    test_id = uuid.uuid4().hex
+    expires_at = time.time() + TEST_SENSOR_TTL
+    with _test_lock:
+        _test_sensors[test_id] = {'id': test_id, 'sensor': sensor, 'config': sensor_config, 'expires_at': expires_at}
+    return {'id': test_id, 'expires_at': expires_at}
+
+
+def remove_test_sensor(test_id: str) -> None:
+    with _test_lock:
+        _test_sensors.pop(test_id, None)
+
+
+def renew_test_sensor(test_id: str) -> bool:
+    """Extend a test sensor's TTL (heartbeat from the dashboard). False if it's gone."""
+    with _test_lock:
+        entry = _test_sensors.get(test_id)
+        if entry is None:
+            return False
+        entry['expires_at'] = time.time() + TEST_SENSOR_TTL
+        return True
+
+
+def active_test_sensors() -> list[dict[str, Any]]:
+    """Currently-live test sensors, pruning any that have expired."""
+    now = time.time()
+    with _test_lock:
+        for test_id in [tid for tid, entry in _test_sensors.items() if entry['expires_at'] < now]:
+            del _test_sensors[test_id]
+        return list(_test_sensors.values())
 
 
 def load_sensors_config():

@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Form, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -126,16 +126,21 @@ def claim_post(request: Request, packet: str = Form(...), sensor_index: int = Fo
 # --- Dashboard ------------------------------------------------------------
 
 def _sensor_list() -> list[dict[str, any]]:
-    """Configured sensors paired with their live stats (None until first seen)."""
+    """Configured sensors paired with their raw config (for the edit form) and live stats
+    (None until first seen). `index` is the position in sensors.yml, used by the CRUD
+    endpoints."""
     with registry.lock:
+        configs = registry.get_sensor_configs()
         return [
             {
+                'index': index,
                 'key': sensor.topic_prefix,
                 'type': sensor.type_name,
                 'identifier': dict(sensor.identifier.identifier),
+                'config': configs[index] if index < len(configs) else None,
                 'stats': stats.sensor_snapshot(sensor.topic_prefix),
             }
-            for sensor in registry.sensors
+            for index, sensor in enumerate(registry.sensors)
         ]
 
 
@@ -185,6 +190,76 @@ def api_restart_receiver(name: str):
         if receiver.name == name:
             return {'restarted': receiver.restart()}
     return JSONResponse({'error': 'No such receiver'}, status_code=404)
+
+
+# --- sensor CRUD ----------------------------------------------------------
+
+def _crud(action):
+    """Run a registry mutation, mapping its errors to clean HTTP responses: an invalid
+    sensor config (raised by build_sensor) becomes 400, a bad index becomes 404."""
+    try:
+        return action()
+    except IndexError as e:
+        return JSONResponse({'error': str(e)}, status_code=404)
+    except Exception as e:  # KeyError / ValueError / etc. from build_sensor
+        return JSONResponse({'error': f'Invalid sensor config: {e}'}, status_code=400)
+
+
+@app.post('/api/sensors')
+def api_add_sensor(config: dict = Body(...)):
+    return _crud(lambda: {'key': registry.add_sensor(config)})
+
+
+@app.put('/api/sensors/{index}')
+def api_update_sensor(index: int, config: dict = Body(...)):
+    def action():
+        old_key, new_key = registry.update_sensor(index, config)
+        if old_key != new_key:
+            stats.drop_sensor(old_key)
+        return {'key': new_key}
+    return _crud(action)
+
+
+@app.delete('/api/sensors/{index}')
+def api_delete_sensor(index: int):
+    def action():
+        key = registry.remove_sensor(index)
+        stats.drop_sensor(key)
+        return {'removed': key}
+    return _crud(action)
+
+
+@app.get('/api/ignored')
+def api_ignored():
+    return registry.list_ignored_sensors()
+
+
+@app.post('/api/ignored')
+def api_add_ignored(identifier: dict = Body(...)):
+    return _crud(lambda: registry.add_ignored_sensor(identifier) or {'ok': True})
+
+
+@app.delete('/api/ignored/{index}')
+def api_delete_ignored(index: int):
+    return _crud(lambda: registry.remove_ignored_sensor(index) or {'ok': True})
+
+
+# --- test sensors ---------------------------------------------------------
+
+@app.post('/api/test-sensors')
+def api_add_test_sensor(config: dict = Body(...)):
+    return _crud(lambda: registry.add_test_sensor(config))
+
+
+@app.post('/api/test-sensors/{test_id}/renew')
+def api_renew_test_sensor(test_id: str):
+    return {'ok': registry.renew_test_sensor(test_id)}
+
+
+@app.delete('/api/test-sensors/{test_id}')
+def api_delete_test_sensor(test_id: str):
+    registry.remove_test_sensor(test_id)
+    return {'ok': True}
 
 
 @app.websocket('/ws')

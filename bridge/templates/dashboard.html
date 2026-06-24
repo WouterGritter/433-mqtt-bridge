@@ -23,8 +23,19 @@
     </section>
 
     <section>
-      <h2>Sensors</h2>
+      <div class="section-head">
+        <h2>Sensors</h2>
+        <button id="add-sensor" type="button">+ Add sensor</button>
+      </div>
       <div id="sensors" class="grid"></div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Ignored devices</h2>
+        <button id="add-ignored" type="button">+ Add ignored</button>
+      </div>
+      <div id="ignored" class="grid"></div>
     </section>
 
     <section>
@@ -39,6 +50,62 @@
       <div id="feed" class="feed"></div>
     </section>
   </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="modal-title">Add sensor</h3>
+        <button id="modal-close" type="button" class="icon-btn">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <label class="field">Type
+          <select id="f-type">
+            <option value="temperature">temperature</option>
+            <option value="tpms">tpms</option>
+            <option value="weather_station">weather_station</option>
+            <option value="button">button</option>
+            <option value="door">door</option>
+            <option value="lightning">lightning</option>
+          </select>
+        </label>
+
+        <label class="field"><span id="f-topic-label">Topic prefix</span>
+          <input id="f-topic" type="text" placeholder="e.g. outdoor/terras">
+        </label>
+
+        <fieldset>
+          <legend>Identifier <small>(fields that must match, e.g. model / id / channel)</small></legend>
+          <div id="f-identifier" class="kv"></div>
+          <button id="f-id-add" type="button" class="small">+ field</button>
+        </fieldset>
+
+        <div id="f-extra"></div>
+
+        <div id="f-error" class="form-error"></div>
+      </div>
+
+      <div class="modal-test">
+        <div class="test-head">
+          <button id="test-toggle" type="button">▶ Start live test</button>
+          <span id="test-status" class="muted"></span>
+        </div>
+        <p class="muted test-hint">Live-matches incoming packets against this config without saving or publishing.</p>
+        <div id="test-output" class="hidden">
+          <div class="test-cols">
+            <div><h4>Raw received</h4><pre id="test-raw">—</pre></div>
+            <div><h4>Parsed (<span id="test-type"></span>)</h4><pre id="test-parsed">—</pre></div>
+          </div>
+          <div id="test-count" class="muted"></div>
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        <button id="modal-cancel" type="button">Cancel</button>
+        <button id="modal-save" type="button" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/vendor/uPlot.iife.min.js"></script>
   <script src="/static/dashboard.js"></script>

@@ -132,7 +132,11 @@ class ButtonRadioSensor(RadioSensor):
         if not super().matches(packet):
             return False
 
-        for code in packet.get_raw_data():
+        raw_data = packet.get_raw_data()
+        if raw_data is None:
+            return False
+
+        for code in raw_data:
             if code in self.buttons.keys():
                 return True
         return False
@@ -203,6 +207,8 @@ class DoorRadioSensor(RadioSensor):
             return False
 
         raw_data = packet.get_raw_data()
+        if raw_data is None:
+            return False
         return self.door_open_code in raw_data or self.door_closed_code in raw_data
 
     def process(self, packet: Packet) -> list[Reading]:

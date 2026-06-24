@@ -113,6 +113,14 @@ function createSensorCard(sensor) {
   const spark = el('div', 'spark');
   card.appendChild(spark);
 
+  const actions = el('div', 'card-actions');
+  const editBtn = el('button', 'small', 'Edit');
+  const delBtn = el('button', 'small danger', 'Delete');
+  editBtn.addEventListener('click', () => openSensorModal(sensor));
+  delBtn.addEventListener('click', () => deleteSensor(sensor));
+  actions.append(editBtn, delBtn);
+  card.appendChild(actions);
+
   document.getElementById('sensors').appendChild(card);
 
   const entry = {
@@ -125,6 +133,27 @@ function createSensorCard(sensor) {
   if (sensor.stats) updateSensorStats(sensor.key, sensor.stats);
   loadSensorHistory(sensor.key);
   return entry;
+}
+
+function renderSensors(sensors) {
+  for (const entry of sensorCards.values()) {
+    if (entry.chart) entry.chart.destroy();
+  }
+  sensorCards.clear();
+  const grid = document.getElementById('sensors');
+  grid.innerHTML = '';
+  if (!sensors.length) grid.appendChild(el('div', 'empty', 'No sensors configured.'));
+  sensors.forEach(createSensorCard);
+}
+
+async function reloadSensors() {
+  try { renderSensors(await getJSON('/api/sensors')); } catch (e) { console.error(e); }
+}
+
+async function deleteSensor(sensor) {
+  if (!confirm(`Delete sensor "${sensor.key}"? This rewrites sensors.yml.`)) return;
+  await fetch('/api/sensors/' + sensor.index, { method: 'DELETE' });
+  reloadSensors();
 }
 
 async function loadSensorHistory(key) {
@@ -320,6 +349,9 @@ function handleEvent(ev) {
     case 'receiver_status':
       if (ev.name) updateReceiverStats(ev.name, ev);
       break;
+    case 'test':
+      onTestEvent(ev);
+      break;
     case 'unknown':
       // Surfaced in the raw feed already; dedicated unknown UI lands in a later phase.
       break;
@@ -346,11 +378,14 @@ async function init() {
     const [sensors, receivers] = await Promise.all([getJSON('/api/sensors'), getJSON('/api/receivers')]);
     if (!receivers.length) document.getElementById('receivers').appendChild(el('div', 'empty', 'No receivers configured.'));
     receivers.forEach(createReceiverCard);
-    if (!sensors.length) document.getElementById('sensors').appendChild(el('div', 'empty', 'No sensors configured.'));
-    sensors.forEach(createSensorCard);
+    renderSensors(sensors);
   } catch (e) {
     console.error('init failed', e);
   }
+
+  reloadIgnored();
+  document.getElementById('add-sensor').addEventListener('click', () => openSensorModal(null));
+  document.getElementById('add-ignored').addEventListener('click', addIgnored);
 
   await refreshStatus();
   connectWs();
@@ -365,5 +400,244 @@ async function init() {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Ignored devices
+// ---------------------------------------------------------------------------
+
+async function reloadIgnored() {
+  let list;
+  try { list = await getJSON('/api/ignored'); } catch (e) { return; }
+  const grid = document.getElementById('ignored');
+  grid.innerHTML = '';
+  if (!list.length) { grid.appendChild(el('div', 'empty', 'No ignored devices.')); return; }
+  list.forEach((ident, index) => {
+    const card = el('div', 'card ignored-card');
+    card.appendChild(el('span', 'ident', Object.entries(ident).map(([k, v]) => `${k}=${v}`).join(', ')));
+    const del = el('button', 'small danger', 'Remove');
+    del.addEventListener('click', async () => { await fetch('/api/ignored/' + index, { method: 'DELETE' }); reloadIgnored(); });
+    card.appendChild(del);
+    grid.appendChild(card);
+  });
+}
+
+async function addIgnored() {
+  const raw = prompt('Ignore devices matching (comma-separated key=value), e.g.\nmodel=Nexa-Security');
+  if (!raw) return;
+  const ident = {};
+  raw.split(',').forEach(pair => {
+    const eq = pair.indexOf('=');
+    if (eq > 0) ident[pair.slice(0, eq).trim()] = coerceValue(pair.slice(eq + 1));
+  });
+  if (!Object.keys(ident).length) return;
+  await fetch('/api/ignored', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ident) });
+  reloadIgnored();
+}
+
+// ---------------------------------------------------------------------------
+// Sensor add/edit modal + live test
+// ---------------------------------------------------------------------------
+
+const modal = document.getElementById('modal');
+const fType = document.getElementById('f-type');
+const fTopic = document.getElementById('f-topic');
+const fTopicLabel = document.getElementById('f-topic-label');
+const fIdentifier = document.getElementById('f-identifier');
+const fExtra = document.getElementById('f-extra');
+const fError = document.getElementById('f-error');
+const testToggle = document.getElementById('test-toggle');
+const testStatus = document.getElementById('test-status');
+const testOutput = document.getElementById('test-output');
+const testRaw = document.getElementById('test-raw');
+const testParsed = document.getElementById('test-parsed');
+const testType = document.getElementById('test-type');
+const testCountEl = document.getElementById('test-count');
+
+let editingIndex = null;
+let testId = null;
+let testRenewTimer = null;
+let testDebounce = null;
+let matchCount = 0;
+
+function coerceValue(s) {
+  s = String(s).trim();
+  if (s === '') return s;
+  if (/^-?\d+$/.test(s)) return parseInt(s, 10);
+  if (/^-?\d*\.\d+$/.test(s)) return parseFloat(s);
+  return s;
+}
+
+function topicKey(type) { return (type === 'door' || type === 'lightning') ? 'topic' : 'topic_prefix'; }
+
+function addKvRow(container, key, val) {
+  const row = el('div', 'kv-row');
+  const k = el('input', 'kv-k'); k.placeholder = 'key'; k.value = key || '';
+  const v = el('input', 'kv-v'); v.placeholder = 'value'; v.value = val === undefined ? '' : val;
+  const rm = el('button', 'small', '✕');
+  rm.type = 'button';
+  rm.addEventListener('click', () => { row.remove(); restartTestSoon(); });
+  row.append(k, v, rm);
+  container.appendChild(row);
+}
+
+function readKv(container, coerce) {
+  const out = {};
+  for (const row of container.querySelectorAll('.kv-row')) {
+    const k = row.querySelector('.kv-k').value.trim();
+    if (!k) continue;
+    const v = row.querySelector('.kv-v').value;
+    out[k] = coerce ? coerceValue(v) : v.trim();
+  }
+  return out;
+}
+
+function updateTopicLabel() {
+  fTopicLabel.textContent = topicKey(fType.value) === 'topic' ? 'Topic' : 'Topic prefix';
+}
+
+function buildExtra(type, config) {
+  fExtra.innerHTML = '';
+  if (type === 'button') {
+    const fs = el('fieldset');
+    fs.appendChild(el('legend', null, 'Buttons (raw code → name)'));
+    const kv = el('div', 'kv'); kv.id = 'f-buttons';
+    fs.appendChild(kv);
+    const add = el('button', 'small', '+ button'); add.type = 'button';
+    add.addEventListener('click', () => addKvRow(kv, '', ''));
+    fs.appendChild(add);
+    fExtra.appendChild(fs);
+    const buttons = (config && config.buttons) || {};
+    const entries = Object.entries(buttons);
+    if (entries.length) entries.forEach(([k, v]) => addKvRow(kv, k, v));
+    else addKvRow(kv, '', '');
+  } else if (type === 'door') {
+    const mk = (id, label, value) => {
+      const wrap = el('label', 'field', label);
+      const input = el('input'); input.id = id; input.type = 'text'; input.value = value || '';
+      wrap.appendChild(input);
+      return wrap;
+    };
+    fExtra.appendChild(mk('f-door-open', 'Door open code', config && config.door_open_code));
+    fExtra.appendChild(mk('f-door-closed', 'Door closed code', config && config.door_closed_code));
+    const rep = el('label', 'field');
+    const cb = el('input'); cb.id = 'f-ignore-repeats'; cb.type = 'checkbox';
+    cb.checked = config ? !!config.ignore_repeats : true;
+    rep.append(cb, document.createTextNode(' ignore repeats'));
+    fExtra.appendChild(rep);
+  }
+}
+
+function assembleConfig() {
+  const type = fType.value;
+  const cfg = { type };
+  cfg[topicKey(type)] = fTopic.value.trim();
+  cfg.identifier = readKv(fIdentifier, true);
+  if (type === 'button') cfg.buttons = readKv(document.getElementById('f-buttons'), false);
+  if (type === 'door') {
+    cfg.door_open_code = document.getElementById('f-door-open').value.trim();
+    cfg.door_closed_code = document.getElementById('f-door-closed').value.trim();
+    cfg.ignore_repeats = document.getElementById('f-ignore-repeats').checked;
+  }
+  return cfg;
+}
+
+function buildForm(config) {
+  const type = (config && config.type) || 'temperature';
+  fType.value = type;
+  updateTopicLabel();
+  fTopic.value = config ? (config.topic_prefix ?? config.topic ?? '') : '';
+  fIdentifier.innerHTML = '';
+  const entries = Object.entries((config && config.identifier) || {});
+  if (entries.length) entries.forEach(([k, v]) => addKvRow(fIdentifier, k, v));
+  else addKvRow(fIdentifier, 'model', '');
+  buildExtra(type, config);
+}
+
+function openSensorModal(sensor) {
+  editingIndex = sensor ? sensor.index : null;
+  document.getElementById('modal-title').textContent = sensor ? 'Edit sensor' : 'Add sensor';
+  fError.textContent = '';
+  stopTest();
+  testOutput.classList.add('hidden');
+  buildForm(sensor ? sensor.config : null);
+  modal.classList.remove('hidden');
+}
+
+function closeModal() {
+  stopTest();
+  modal.classList.add('hidden');
+}
+
+async function saveSensor() {
+  const cfg = assembleConfig();
+  const url = editingIndex == null ? '/api/sensors' : '/api/sensors/' + editingIndex;
+  const method = editingIndex == null ? 'POST' : 'PUT';
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+  const d = await r.json();
+  if (!r.ok) { fError.textContent = d.error || 'Save failed'; return; }
+  closeModal();
+  reloadSensors();
+}
+
+// --- live test ---
+
+function toggleTest() { testId ? stopTest() : startTest(); }
+
+async function startTest() {
+  const cfg = assembleConfig();
+  const r = await fetch('/api/test-sensors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+  const d = await r.json();
+  if (!r.ok) { fError.textContent = d.error || 'Invalid config'; return; }
+  fError.textContent = '';
+  testId = d.id;
+  matchCount = 0;
+  testToggle.textContent = '■ Stop test';
+  testStatus.textContent = 'listening…';
+  testType.textContent = cfg.type;
+  testRaw.textContent = '—';
+  testParsed.textContent = '—';
+  testCountEl.textContent = '';
+  testOutput.classList.remove('hidden');
+  clearInterval(testRenewTimer);
+  testRenewTimer = setInterval(() => { if (testId) fetch('/api/test-sensors/' + testId + '/renew', { method: 'POST' }); }, 120000);
+}
+
+function stopTest() {
+  if (testId) { fetch('/api/test-sensors/' + testId, { method: 'DELETE' }); testId = null; }
+  clearInterval(testRenewTimer); testRenewTimer = null;
+  clearTimeout(testDebounce); testDebounce = null;
+  testToggle.textContent = '▶ Start live test';
+  testStatus.textContent = '';
+}
+
+function restartTestSoon() {
+  if (!testId) return;
+  testStatus.textContent = 'updating…';
+  clearTimeout(testDebounce);
+  testDebounce = setTimeout(() => {
+    const old = testId;
+    testId = null;
+    fetch('/api/test-sensors/' + old, { method: 'DELETE' });
+    startTest();
+  }, 700);
+}
+
+function onTestEvent(ev) {
+  if (ev.id !== testId) return;
+  matchCount++;
+  testRaw.textContent = JSON.stringify(ev.raw, null, 2);
+  const hasParsed = ev.readings && Object.keys(ev.readings).length;
+  testParsed.textContent = hasParsed ? JSON.stringify(ev.readings, null, 2) : '(matched — no parsed output for this packet)';
+  testStatus.textContent = matchCount + ' matched';
+}
+
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+document.getElementById('modal-save').addEventListener('click', saveSensor);
+document.getElementById('f-id-add').addEventListener('click', () => addKvRow(fIdentifier, '', ''));
+testToggle.addEventListener('click', toggleTest);
+fType.addEventListener('change', () => { updateTopicLabel(); buildExtra(fType.value, null); restartTestSoon(); });
+modal.addEventListener('input', restartTestSoon);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 
 init();

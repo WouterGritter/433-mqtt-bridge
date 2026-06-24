@@ -20,6 +20,25 @@ def with_claim_link(message: str, packet: Packet) -> str:
     return message
 
 
+def process_test_sensors(packet: Packet):
+    """Run a packet through any active test sensors and emit their parsed output. Test
+    sensors are matched against every packet (known, unknown, or ignored) so a candidate
+    config can be tried against live traffic, but their readings are never published or
+    persisted."""
+    for entry in registry.active_test_sensors():
+        sensor = entry['sensor']
+        if not sensor.matches(packet):
+            continue
+        readings = sensor.process(packet)
+        events.emit('test', {
+            'id': entry['id'],
+            'receiver': packet.origin.name,
+            'time': packet.receive_time.isoformat(),
+            'raw': packet.data,
+            'readings': {reading.topic: reading.value for reading in readings},
+        })
+
+
 def process_packet(packet: Packet):
     sensor = registry.find_sensor(packet)
     ignored = sensor is None and registry.is_ignored(packet)
@@ -34,6 +53,9 @@ def process_packet(packet: Packet):
         'sensor': sensor.topic_prefix if sensor is not None else None,
         'ignored': ignored,
     })
+
+    # Test sensors see every packet, independent of the known/ignored/unknown handling.
+    process_test_sensors(packet)
 
     if ignored:
         return
