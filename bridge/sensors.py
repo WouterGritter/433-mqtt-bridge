@@ -1,11 +1,22 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Optional
 
 from .calculated_attributes import CalculatedAttributes, RainRateCalculatedAttribute
-from .mqtt_client import publish
+from .config import MQTT_RETAIN
 from .packet import Packet
+
+
+@dataclass
+class Reading:
+    """A single value a sensor wants published to MQTT, decoupled from the act of
+    publishing so the processing layer can decide what to do with it (publish for real
+    sensors, emit-only for test sensors)."""
+    topic: str
+    value: any
+    retain: bool = MQTT_RETAIN
 
 
 class SensorIdentifier:
@@ -31,7 +42,7 @@ class RadioSensor(ABC):
         return self.identifier.matches(packet)
 
     @abstractmethod
-    def process(self, packet: Packet) -> None:
+    def process(self, packet: Packet) -> list[Reading]:
         pass
 
 
@@ -42,19 +53,17 @@ class GenericRadioSensor(RadioSensor):
         self.data_key_map = data_key_map
         self.calculated_attributes = calculated_attributes
 
-    def process(self, packet: Packet) -> None:
+    def process(self, packet: Packet) -> list[Reading]:
         data = {mqtt_attribute: packet.data[data_key] for mqtt_attribute, data_key in self.data_key_map.items() if data_key in packet.data}
-        for attribute, value in data.items():
-            topic = f'{self.topic_prefix}/{attribute}'
-            publish(topic, value)
+        readings = [Reading(f'{self.topic_prefix}/{attribute}', value) for attribute, value in data.items()]
 
         if self.calculated_attributes is not None:
             for attribute_calculator in self.calculated_attributes:
                 additional_data = attribute_calculator.generate_calculated_attributes(data)
                 if additional_data is not None:
-                    for attribute, value in additional_data.items():
-                        topic = f'{self.topic_prefix}/{attribute}'
-                        publish(topic, value)
+                    readings.extend(Reading(f'{self.topic_prefix}/{attribute}', value) for attribute, value in additional_data.items())
+
+        return readings
 
 
 class TemperatureRadioSensor(GenericRadioSensor):
@@ -117,12 +126,13 @@ class ButtonRadioSensor(RadioSensor):
                 return True
         return False
 
-    def process(self, packet: Packet) -> None:
+    def process(self, packet: Packet) -> list[Reading]:
+        readings = []
         for code in packet.get_raw_data():
             button = self.buttons.get(code, None)
             if button is not None:
-                topic = f'{self.topic_prefix}/{button}'
-                publish(topic, 'pressed', retain=False)
+                readings.append(Reading(f'{self.topic_prefix}/{button}', 'pressed', retain=False))
+        return readings
 
 
 class LightningRadioSensor(RadioSensor):
@@ -132,26 +142,26 @@ class LightningRadioSensor(RadioSensor):
         self.topic = topic
         self.last_strike_count: Optional[int] = None
 
-    def process(self, packet: Packet) -> None:
+    def process(self, packet: Packet) -> list[Reading]:
         strike_count = int(packet.data['strike_count'])
         if self.last_strike_count is None:
             # First time we hear this sensor. Assume it isn't a lightning strike and record `strike_count`.
             self.last_strike_count = strike_count
-            return
+            return []
 
         if strike_count == self.last_strike_count:
             # Ignore when `strike_count` didn't change.
-            return
+            return []
 
         if strike_count == 0:
             # Ignore when `strike_count` is 0. This means the sensor got reset whilst we did receive a previously higher `strike_count`.
             self.last_strike_count = strike_count
-            return
+            return []
 
         storm_dist_km = int(packet.data['storm_dist_km'])
-        publish(self.topic, str(storm_dist_km), retain=False)
-
         self.last_strike_count = strike_count
+
+        return [Reading(self.topic, str(storm_dist_km), retain=False)]
 
 
 class DoorState(Enum):
@@ -180,20 +190,20 @@ class DoorRadioSensor(RadioSensor):
         raw_data = packet.get_raw_data()
         return self.door_open_code in raw_data or self.door_closed_code in raw_data
 
-    def process(self, packet: Packet) -> None:
+    def process(self, packet: Packet) -> list[Reading]:
         raw_data = packet.get_raw_data()
         if self.door_open_code in raw_data:
             door_state = DoorState.OPEN
         elif self.door_closed_code in raw_data:
             door_state = DoorState.CLOSED
         else:
-            return
+            return []
 
         if self.ignore_repeats and door_state == self.current_door_state:
-            return
+            return []
 
         self.current_door_state = door_state
-        publish(self.topic, door_state.mqtt_name)
+        return [Reading(self.topic, door_state.mqtt_name)]
 
 
 def build_sensor(config: dict):

@@ -3,3 +3,5 @@
 sensors.yml
 receivers.yml
 __pycache__/
+stats.db
+stats.db-*

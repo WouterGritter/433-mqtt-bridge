@@ -1,3 +1,4 @@
+import threading
 from queue import Queue
 from typing import Optional, TYPE_CHECKING
 
@@ -18,21 +19,29 @@ receivers: list['Receiver'] = []
 sensors: list[RadioSensor] = []
 ignored_sensors: list[SensorIdentifier] = []
 
+# Guards reads of and mutations to `sensors` / `ignored_sensors`. The packet-processing
+# thread reads these lists while the web server may mutate them (claim, add, remove,
+# modify), so all such access must be serialised. Reentrant so a locked mutation can call
+# locked read helpers.
+lock = threading.RLock()
+
 packet_receive_queue: Queue[Packet] = Queue()
 
 
 def find_sensor(packet: Packet) -> Optional[RadioSensor]:
-    for sensor in sensors:
-        if sensor.matches(packet):
-            return sensor
+    with lock:
+        for sensor in sensors:
+            if sensor.matches(packet):
+                return sensor
 
     return None
 
 
 def is_ignored(packet: Packet) -> bool:
-    for ignored in ignored_sensors:
-        if ignored.matches(packet):
-            return True
+    with lock:
+        for ignored in ignored_sensors:
+            if ignored.matches(packet):
+                return True
 
     return False
 
@@ -43,12 +52,13 @@ def find_claim_candidates(packet_data: dict[str, any]) -> list[tuple[int, RadioS
     packet. The returned index is the sensor's position in both `sensors` and the
     `sensors.yml` `sensors:` list (they are loaded in lockstep)."""
     candidates = []
-    for index, sensor in enumerate(sensors):
-        identifier = sensor.identifier.identifier
-        if 'id' not in identifier:
-            continue
-        if all(packet_data.get(key) == value for key, value in identifier.items() if key != 'id'):
-            candidates.append((index, sensor))
+    with lock:
+        for index, sensor in enumerate(sensors):
+            identifier = sensor.identifier.identifier
+            if 'id' not in identifier:
+                continue
+            if all(packet_data.get(key) == value for key, value in identifier.items() if key != 'id'):
+                candidates.append((index, sensor))
 
     return candidates
 
@@ -56,15 +66,16 @@ def find_claim_candidates(packet_data: dict[str, any]) -> list[tuple[int, RadioS
 def claim_sensor(index: int, new_id: any) -> None:
     """Re-point the configured sensor at `index` to `new_id`: persist it to sensors.yml
     and update the live sensor in place (no restart, runtime state preserved)."""
-    with open(SENSORS_CONFIG_PATH, 'r') as f:
-        config = yaml.safe_load(f)
+    with lock:
+        with open(SENSORS_CONFIG_PATH, 'r') as f:
+            config = yaml.safe_load(f)
 
-    config['sensors'][index]['identifier']['id'] = new_id
+        config['sensors'][index]['identifier']['id'] = new_id
 
-    with open(SENSORS_CONFIG_PATH, 'w') as f:
-        yaml.safe_dump(config, f, sort_keys=False)
+        with open(SENSORS_CONFIG_PATH, 'w') as f:
+            yaml.safe_dump(config, f, sort_keys=False)
 
-    sensors[index].identifier.identifier['id'] = new_id
+        sensors[index].identifier.identifier['id'] = new_id
 
 
 def load_sensors_config():

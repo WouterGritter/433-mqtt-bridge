@@ -16,6 +16,8 @@ DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 BASE_URL = os.getenv('BASE_URL', '').rstrip('/')
 WEB_HOST = os.getenv('WEB_HOST', '0.0.0.0')
 WEB_PORT = int(os.getenv('WEB_PORT', '8000'))
+STATS_DB_PATH = os.getenv('STATS_DB_PATH', 'stats.db')
+STATS_RETENTION_DAYS = float(os.getenv('STATS_RETENTION_DAYS', '30'))
 
 IGNORE_DATA_KEYS = [
     'repeat',

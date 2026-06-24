@@ -3,6 +3,7 @@ import threading
 
 from . import mqtt_client
 from . import registry
+from . import storage
 from . import webapp
 from .config import (
     BASE_URL,
@@ -48,6 +49,8 @@ def main():
     registry.load_sensors_config()
 
     print(f'Loaded {len(registry.receivers)} receivers, {len(registry.sensors)} sensors and {len(registry.ignored_sensors)} ignored sensors.')
+
+    storage.init()
 
     mqtt_client.connect()
 

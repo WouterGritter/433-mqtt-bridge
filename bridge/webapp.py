@@ -1,5 +1,7 @@
+import asyncio
 import base64
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -8,10 +10,20 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from . import events
 from . import registry
 from .config import WEB_HOST, WEB_PORT
 
-app = FastAPI(title='433-mqtt-bridge')
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Hand the event bus the loop the web server runs on, so the threaded packet
+    # pipeline can push events to WebSocket clients via call_soon_threadsafe.
+    events.set_loop(asyncio.get_running_loop())
+    yield
+
+
+app = FastAPI(title='433-mqtt-bridge', lifespan=lifespan)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / 'templates'))
 
 

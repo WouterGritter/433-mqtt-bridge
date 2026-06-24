@@ -2,6 +2,7 @@ import json
 
 from . import registry
 from .config import BASE_URL, IGNORE_DUPLICATE_PACKETS_TIMEFRAME
+from .mqtt_client import publish
 from .notifications import build_claim_url, send_discord_message
 from .packet import Packet, PacketTimeRingBuffer
 
@@ -43,7 +44,8 @@ def process_packet(packet: Packet):
 
     if sensor is not None:
         sensor.last_seen = packet.receive_time
-        sensor.process(packet)
+        for reading in sensor.process(packet):
+            publish(reading.topic, reading.value, retain=reading.retain)
 
 
 def process_packet_worker():
