@@ -39,12 +39,13 @@ def process_test_sensors(packet: Packet):
         })
 
 
-def process_packet(packet: Packet):
+def process_packet(packet: Packet, duplicate: bool = False):
     sensor = registry.find_sensor(packet)
     ignored = sensor is None and registry.is_ignored(packet)
 
-    # Receiver stats and the raw firehose count every packet the bridge sees, including
-    # ignored ones (they are still received), so the dashboard reflects reality.
+    # Receiver stats and the raw firehose count every packet the bridge sees — including
+    # ignored ones and duplicates from a second receiver — so a receiver that only ever
+    # loses the de-dup race still shows activity and the dashboard reflects reality.
     stats.record_receiver_packet(packet)
     events.emit('packet', {
         'receiver': packet.origin.name,
@@ -52,12 +53,30 @@ def process_packet(packet: Packet):
         'data': packet.data,
         'sensor': sensor.topic_prefix if sensor is not None else None,
         'ignored': ignored,
+        'duplicate': duplicate,
     })
 
     # Test sensors see every packet, independent of the known/ignored/unknown handling.
     process_test_sensors(packet)
 
+    # Attribute the reception to this receiver for the per-sensor "seen by" view, whether
+    # or not this copy is the one we go on to publish.
+    if sensor is not None:
+        stats.record_sensor_source(sensor.topic_prefix, packet.origin.name, packet.receive_time)
+
     if ignored:
+        return
+
+    if duplicate:
+        # An identical packet was processed within the de-dup window (e.g. the same
+        # reading picked up by another receiver, or an rtl_433 repeat). The reception was
+        # attributed above; don't publish, persist, or re-notify. Push a light update so
+        # the dashboard shows the extra receiver immediately.
+        if sensor is not None:
+            events.emit('sensor_source', {
+                'sensor': sensor.topic_prefix,
+                'snapshot': stats.sensor_snapshot(sensor.topic_prefix),
+            })
         return
 
     if packet.data.get('button', 0) == 1:
@@ -108,8 +127,10 @@ def process_packet_worker():
     while True:
         packet = registry.packet_receive_queue.get()
 
-        if previous_packets.contains_duplicate(packet):
-            continue
+        # Duplicates are still processed (to attribute the reception to their receiver),
+        # but flagged so they don't get published/persisted/re-notified again.
+        duplicate = previous_packets.contains_duplicate(packet)
+        if not duplicate:
+            previous_packets.add(packet)
 
-        previous_packets.add(packet)
-        process_packet(packet)
+        process_packet(packet, duplicate)

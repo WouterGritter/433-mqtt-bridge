@@ -90,6 +90,10 @@ section h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: .04em; 
 .meta .age-stale { color: var(--warn); }
 .meta .age-offline { color: var(--bad); }
 
+.sources-line { font-size: .75rem; margin-top: .35rem; }
+.sources-line.multi { color: var(--accent); }
+.sources-line .src { white-space: nowrap; }
+
 .spark { margin-top: .5rem; }
 .spark .u-legend { display: none; }
 
@@ -111,11 +115,13 @@ button:disabled { opacity: .5; cursor: default; }
   overflow: auto;
 }
 .feed .line { white-space: pre-wrap; word-break: break-all; padding: .05rem 0; border-bottom: 1px solid #1c222b; }
+.feed .line.dup { opacity: .5; }
 .feed .ts { color: #6b7480; }
 .feed .tag { padding: 0 .35rem; border-radius: 4px; font-size: .7rem; }
 .feed .tag-known { background: #16432b; color: #6fe2a0; }
 .feed .tag-unknown { background: #4a3a12; color: #f2c869; }
 .feed .tag-ignored { background: #2a2f37; color: #8a93a0; }
+.feed .tag-dup { background: #23303f; color: #7fa7ff; margin-left: .25rem; }
 .feed .rcv { color: #7fa7ff; }
 
 .empty { color: var(--muted); font-size: .85rem; }

@@ -112,6 +112,9 @@ function createSensorCard(sensor) {
   meta.append(age, rate, battery, signal);
   card.appendChild(meta);
 
+  const sources = el('div', 'sources-line muted');
+  card.appendChild(sources);
+
   const spark = el('div', 'spark');
   card.appendChild(spark);
 
@@ -127,8 +130,8 @@ function createSensorCard(sensor) {
 
   const entry = {
     el: card,
-    refs: { dot, readings, age, rate, battery, signal, spark },
-    chart: null, xs: [], ys: [], primaryTopic: null, lastSeen: null,
+    refs: { dot, readings, age, rate, battery, signal, sources, spark },
+    chart: null, xs: [], ys: [], primaryTopic: null, lastSeen: null, sourcesData: [],
   };
   sensorCards.set(sensor.key, entry);
 
@@ -194,7 +197,22 @@ function updateSensorStats(key, s) {
   r.rate.textContent = (s.rate_per_min || 0) + '/min';
   r.battery.textContent = s.battery_ok == null ? '' : (s.battery_ok ? '🔋 ok' : '🪫 low');
   r.signal.textContent = s.rssi == null ? '' : ('📶 ' + s.rssi.toFixed(0) + ' dBm');
+  entry.sourcesData = s.sources || [];
   refreshAge(key);
+}
+
+function renderSources(entry) {
+  const list = entry.sourcesData || [];
+  const node = entry.refs.sources;
+  node.className = 'sources-line' + (list.length > 1 ? ' multi' : ' muted');
+  if (!list.length) { node.textContent = ''; return; }
+  node.innerHTML = '';
+  node.appendChild(document.createTextNode('📡 '));
+  list.forEach((src, i) => {
+    if (i) node.appendChild(document.createTextNode(' · '));
+    const secs = src.last_seen ? (Date.now() - Date.parse(src.last_seen)) / 1000 : null;
+    node.appendChild(el('span', 'src', `${src.receiver} (${fmtAge(secs)})`));
+  });
 }
 
 function appendSensorPoint(key, readings, tsIso) {
@@ -214,6 +232,7 @@ function appendSensorPoint(key, readings, tsIso) {
 function refreshAge(key) {
   const entry = sensorCards.get(key);
   if (!entry) return;
+  renderSources(entry);
   const r = entry.refs;
   if (entry.lastSeen == null) {
     r.age.textContent = 'not seen';
@@ -301,10 +320,11 @@ function addFeedLine(ev) {
   const filter = feedFilter.value.trim().toLowerCase();
   if (filter && !(json + ' ' + ev.receiver + ' ' + label).toLowerCase().includes(filter)) return;
 
-  const line = el('div', 'line');
+  const line = el('div', 'line' + (ev.duplicate ? ' dup' : ''));
   line.appendChild(el('span', 'ts', new Date(ev.time).toLocaleTimeString() + ' '));
   line.appendChild(el('span', 'rcv', ev.receiver + ' '));
   line.appendChild(el('span', 'tag tag-' + tag, label));
+  if (ev.duplicate) line.appendChild(el('span', 'tag tag-dup', 'dup'));
   line.appendChild(document.createTextNode(' ' + json));
 
   const atBottom = feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 40;
@@ -347,6 +367,10 @@ function handleEvent(ev) {
     case 'reading':
       if (ev.snapshot) updateSensorStats(ev.sensor, ev.snapshot);
       appendSensorPoint(ev.sensor, ev.readings || {}, ev.time);
+      break;
+    case 'sensor_source':
+      // A duplicate reading from another receiver: only the "seen by" view changes.
+      if (ev.snapshot) updateSensorStats(ev.sensor, ev.snapshot);
       break;
     case 'receiver_status':
       if (ev.name) updateReceiverStats(ev.name, ev);

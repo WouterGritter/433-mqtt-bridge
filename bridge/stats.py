@@ -50,6 +50,18 @@ class SensorStats:
         self.rssi: Optional[float] = None
         self.snr: Optional[float] = None
         self._recent: deque[float] = deque()
+        # Which receivers have picked this sensor up, and when last. Updated for every
+        # reception including de-duplicated copies, so a sensor heard by several
+        # receivers shows them all even though only one copy is published.
+        self.sources: dict[str, dict[str, Any]] = {}
+
+    def record_source(self, receiver_name: str, when: datetime) -> None:
+        source = self.sources.get(receiver_name)
+        if source is None:
+            source = {'count': 0, 'last_seen': None}
+            self.sources[receiver_name] = source
+        source['count'] += 1
+        source['last_seen'] = when
 
     def record(self, packet: 'Packet', readings: list['Reading']) -> None:
         now = time.time()
@@ -71,18 +83,28 @@ class SensorStats:
 
     def snapshot(self) -> dict[str, Any]:
         now = time.time()
+        now_dt = datetime.now()
         _trim(self._recent, now)
         return {
             'key': self.key,
             'packet_count': self.packet_count,
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
-            'seconds_since_seen': (datetime.now() - self.last_seen).total_seconds() if self.last_seen else None,
+            'seconds_since_seen': (now_dt - self.last_seen).total_seconds() if self.last_seen else None,
             'rate_per_min': len(self._recent),
             'last_readings': self.last_readings,
             'last_raw': self.last_raw,
             'battery_ok': self.battery_ok,
             'rssi': self.rssi,
             'snr': self.snr,
+            'sources': [
+                {
+                    'receiver': name,
+                    'count': source['count'],
+                    'last_seen': source['last_seen'].isoformat() if source['last_seen'] else None,
+                    'seconds_since_seen': (now_dt - source['last_seen']).total_seconds() if source['last_seen'] else None,
+                }
+                for name, source in sorted(self.sources.items())
+            ],
         }
 
 
@@ -154,6 +176,13 @@ def _get_receiver(name: str) -> ReceiverStats:
 def record_sensor_packet(sensor: 'RadioSensor', packet: 'Packet', readings: list['Reading']) -> None:
     with _lock:
         _get_sensor(sensor.topic_prefix).record(packet, readings)
+
+
+def record_sensor_source(sensor_key: str, receiver_name: str, when: datetime) -> None:
+    """Attribute a reception of `sensor_key` to `receiver_name`. Called for every matching
+    packet, including de-duplicated copies, to power the per-sensor 'seen by' view."""
+    with _lock:
+        _get_sensor(sensor_key).record_source(receiver_name, when)
 
 
 def record_receiver_packet(packet: 'Packet') -> None:
