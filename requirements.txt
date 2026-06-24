@@ -1,0 +1,4 @@
+paho-mqtt
+pyyaml
+python-dotenv
+discord-webhook

@@ -2,3 +2,4 @@
 .env
 sensors.yml
 receivers.yml
+__pycache__/
