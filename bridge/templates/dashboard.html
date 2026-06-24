@@ -31,11 +31,25 @@
     </section>
 
     <section>
+      <h2>Recent unknown devices</h2>
+      <div id="unknowns" class="grid"></div>
+    </section>
+
+    <section>
       <div class="section-head">
         <h2>Ignored devices</h2>
         <button id="add-ignored" type="button">+ Add ignored</button>
       </div>
       <div id="ignored" class="grid"></div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Custom decoders</h2>
+        <button id="add-decoder" type="button">+ Add decoder</button>
+      </div>
+      <p class="muted decoder-hint">rtl_433 <code>-X</code> specs from receivers.yml. Changes apply after a receiver restart.</p>
+      <div id="decoders" class="grid"></div>
     </section>
 
     <section>

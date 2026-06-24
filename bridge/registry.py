@@ -277,3 +277,49 @@ def load_receivers_config():
             name=receiver_config['name'],
             arguments=receiver_config['arguments'],
         ))
+
+
+# --- receivers.yml custom decoders -----------------------------------------
+#
+# Custom decoders are rtl_433 `-X` spec strings. They are read once at startup and passed
+# to every receiver on launch, so changes here are persisted to receivers.yml and applied
+# to the in-memory list immediately but only take effect for a receiver once it is
+# restarted (see Receiver.restart).
+
+def _read_receivers_config() -> dict:
+    with open(RECEIVERS_CONFIG_PATH, 'r') as f:
+        config = yaml.safe_load(f) or {}
+    config.setdefault('receivers', [])
+    config.setdefault('custom_decoders', [])
+    return config
+
+
+def _write_receivers_config(config: dict) -> None:
+    with open(RECEIVERS_CONFIG_PATH, 'w') as f:
+        yaml.safe_dump(config, f, sort_keys=False)
+
+
+def list_custom_decoders() -> list[str]:
+    with lock:
+        return list(custom_decoders)
+
+
+def add_custom_decoder(decoder: str) -> None:
+    decoder = decoder.strip()
+    if not decoder:
+        raise ValueError('decoder must not be empty')
+    with lock:
+        config = _read_receivers_config()
+        config['custom_decoders'].append(decoder)
+        _write_receivers_config(config)
+        custom_decoders.append(decoder)
+
+
+def remove_custom_decoder(index: int) -> None:
+    with lock:
+        config = _read_receivers_config()
+        if not 0 <= index < len(config['custom_decoders']):
+            raise IndexError('decoder index out of range')
+        del config['custom_decoders'][index]
+        _write_receivers_config(config)
+        del custom_decoders[index]

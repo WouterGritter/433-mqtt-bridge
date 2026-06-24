@@ -353,7 +353,7 @@ function handleEvent(ev) {
       onTestEvent(ev);
       break;
     case 'unknown':
-      // Surfaced in the raw feed already; dedicated unknown UI lands in a later phase.
+      scheduleUnknownsReload();
       break;
   }
 }
@@ -384,8 +384,11 @@ async function init() {
   }
 
   reloadIgnored();
+  reloadUnknowns();
+  reloadDecoders();
   document.getElementById('add-sensor').addEventListener('click', () => openSensorModal(null));
   document.getElementById('add-ignored').addEventListener('click', addIgnored);
+  document.getElementById('add-decoder').addEventListener('click', addDecoder);
 
   await refreshStatus();
   connectWs();
@@ -399,6 +402,85 @@ async function init() {
       if (entry.chart) entry.chart.setSize({ width: entry.refs.spark.clientWidth || 260, height: 70 });
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Recent unknown devices (claim / create from a live packet)
+// ---------------------------------------------------------------------------
+
+const DEVICE_FIELDS = ['model', 'subtype', 'id', 'channel', 'type'];
+
+let unknownsDebounce = null;
+function scheduleUnknownsReload() {
+  clearTimeout(unknownsDebounce);
+  unknownsDebounce = setTimeout(reloadUnknowns, 500);
+}
+
+async function reloadUnknowns() {
+  let list;
+  try { list = await getJSON('/api/unknowns'); } catch (e) { return; }
+  const grid = document.getElementById('unknowns');
+  grid.innerHTML = '';
+  if (!list.length) { grid.appendChild(el('div', 'empty', 'No unknown devices seen yet.')); return; }
+  list.slice(0, 10).forEach(createUnknownCard);
+}
+
+function prefillFromPacket(data) {
+  const identifier = {};
+  for (const f of DEVICE_FIELDS) if (f in data) identifier[f] = data[f];
+  return { index: null, config: { type: 'temperature', topic_prefix: '', identifier } };
+}
+
+function createUnknownCard(u) {
+  const card = el('div', 'card unknown-card');
+  const head = el('div', 'uk-head');
+  head.append(el('span', null, u.receiver), el('span', null, new Date(u.time).toLocaleTimeString()));
+  card.appendChild(head);
+  card.appendChild(el('pre', null, JSON.stringify(u.data, null, 2)));
+
+  const actions = el('div', 'card-actions');
+  const newBtn = el('button', 'small primary', 'New sensor');
+  newBtn.addEventListener('click', () => openSensorModal(prefillFromPacket(u.data)));
+  actions.appendChild(newBtn);
+  if ('id' in u.data && u.encoded) {
+    const claim = el('button', 'small', 'Claim existing');
+    claim.addEventListener('click', () => { location.href = '/claim?packet=' + encodeURIComponent(u.encoded); });
+    actions.appendChild(claim);
+  }
+  card.appendChild(actions);
+  document.getElementById('unknowns').appendChild(card);
+}
+
+// ---------------------------------------------------------------------------
+// Custom decoders
+// ---------------------------------------------------------------------------
+
+async function reloadDecoders() {
+  let list;
+  try { list = await getJSON('/api/decoders'); } catch (e) { return; }
+  const grid = document.getElementById('decoders');
+  grid.innerHTML = '';
+  if (!list.length) { grid.appendChild(el('div', 'empty', 'No custom decoders.')); return; }
+  list.forEach((spec, index) => {
+    const card = el('div', 'card decoder-card');
+    card.appendChild(el('span', 'spec', spec));
+    const del = el('button', 'small danger', 'Remove');
+    del.addEventListener('click', async () => {
+      if (!confirm('Remove this decoder? Applies after a receiver restart.')) return;
+      await fetch('/api/decoders/' + index, { method: 'DELETE' });
+      reloadDecoders();
+    });
+    card.appendChild(del);
+    grid.appendChild(card);
+  });
+}
+
+async function addDecoder() {
+  const spec = prompt('rtl_433 -X decoder spec, e.g.\nn=mybutton,m=OOK_PWM,s=364,l=1072,r=1084,g=0,t=283,y=0,bits=25');
+  if (!spec) return;
+  const r = await fetch('/api/decoders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decoder: spec }) });
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Failed to add decoder'); return; }
+  reloadDecoders();
 }
 
 // ---------------------------------------------------------------------------
@@ -554,8 +636,10 @@ function buildForm(config) {
 }
 
 function openSensorModal(sensor) {
-  editingIndex = sensor ? sensor.index : null;
-  document.getElementById('modal-title').textContent = sensor ? 'Edit sensor' : 'Add sensor';
+  // sensor may be: null (blank add), an existing sensor (edit, has index), or a prefill
+  // {index: null, config} built from an unknown packet (add, prefilled).
+  editingIndex = sensor && sensor.index != null ? sensor.index : null;
+  document.getElementById('modal-title').textContent = editingIndex == null ? 'Add sensor' : 'Edit sensor';
   fError.textContent = '';
   stopTest();
   testOutput.classList.add('hidden');

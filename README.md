@@ -49,6 +49,8 @@ The bridge is configured through a `.env` file and two YAML files. See `.env.exa
 | `RECEIVERS_CONFIG_PATH` | `receivers.yml` | Path to the receivers config |
 | `SENSORS_CONFIG_PATH` | `sensors.yml` | Path to the sensors config |
 | `IGNORE_DUPLICATE_PACKETS_TIMEFRAME` | `3` | Seconds within which identical packets are dropped |
+| `STATS_DB_PATH` | `stats.db` | SQLite file storing reading history for the dashboard |
+| `STATS_RETENTION_DAYS` | `30` | How long reading history is kept before pruning |
 
 ### Receivers (`receivers.yml`)
 
@@ -84,24 +86,50 @@ ignored_sensors:
   - model: 'Nexa-Security'
 ```
 
-## Web interface & claiming sensors
+## Web interface & dashboard
 
-The bridge serves a small web interface (FastAPI) on `WEB_HOST:WEB_PORT`. Its first
-feature solves a specific annoyance: sensors that include an `id` field get a **new
-`id` every time you swap their batteries**, which otherwise means editing
-`sensors.yml` and restarting.
+The bridge serves a web interface (FastAPI) on `WEB_HOST:WEB_PORT`. It is
+**unauthenticated** — run it behind your reverse proxy, not exposed directly.
 
-When an unknown device with an `id` is seen, the Discord alert now includes a
-**"Claim this sensor"** link (requires `BASE_URL` to be set). Opening it shows the
-unknown packet and a dropdown of configured sensors whose identifier matches on
-everything *except* `id` (e.g. same `model` and `channel`). Picking one updates that
-sensor's `id` — written to `sensors.yml` **and** applied to the running process
-immediately, so no restart is needed. Devices without an `id` (buttons, door sensors)
-use stable raw codes and are unaffected.
+### Dashboard (`/`)
 
-> This is the seed of a planned dashboard (add/remove/modify sensors & receivers,
-> stats). For now it only handles claiming. Note the interface is unauthenticated —
-> run it behind your reverse proxy, not exposed directly.
+A live dashboard (updated over a WebSocket) showing:
+
+- **Sensors** — per-sensor cards with the latest parsed values, battery and signal
+  status, packet rate, a freshness/stale indicator, and a sparkline of recent history
+  (persisted to SQLite, so it survives restarts).
+- **Receivers** — per-receiver status (running, restart count, packet rate, last seen,
+  average signal) with a **Restart** button.
+- **Raw feed** — a live firehose of every received packet, with a text filter, tagging
+  each as known / unknown / ignored.
+- **MQTT status** — connection state and a published-message counter.
+
+From the dashboard you can also:
+
+- **Add, edit and remove sensors** (and ignored devices) — changes are written to
+  `sensors.yml` and applied to the running process immediately.
+- **Test a sensor before saving it** — enter a candidate config and watch it match live
+  traffic, showing the **raw JSON received alongside the parsed values** for the chosen
+  type. The test sensor is never saved and **never published to MQTT**.
+- **Claim or adopt unknown devices** — the most recent unknown readings are listed; for
+  each you can re-claim it onto an existing sensor (see below) or create a new sensor
+  prefilled from its packet (and test it first).
+- **Manage custom decoders** — add/remove the `rtl_433` `-X` specs in `receivers.yml`
+  (applied after a receiver restart).
+
+### Claiming sensors
+
+Sensors that include an `id` field get a **new `id` every time you swap their
+batteries**, which would otherwise mean editing `sensors.yml` and restarting.
+
+When an unknown device with an `id` is seen, the Discord alert includes a **"Claim this
+sensor"** link (requires `BASE_URL`); the same packets also appear in the dashboard's
+unknown list. Opening the claim view shows the unknown packet and a dropdown of
+configured sensors whose identifier matches on everything *except* `id` (e.g. same
+`model` and `channel`). Picking one updates that sensor's `id` — written to
+`sensors.yml` **and** applied to the running process immediately, so no restart is
+needed. Devices without an `id` (buttons, door sensors) use stable raw codes and are
+unaffected.
 
 ## Running
 

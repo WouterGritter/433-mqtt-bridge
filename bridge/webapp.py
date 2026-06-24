@@ -17,6 +17,7 @@ from . import registry
 from . import stats
 from . import storage
 from .config import WEB_HOST, WEB_PORT
+from .notifications import encode_packet
 
 
 @asynccontextmanager
@@ -170,7 +171,11 @@ def api_receivers():
 
 @app.get('/api/unknowns')
 def api_unknowns():
-    return registry.list_recent_unknowns()
+    # Include the encoded packet so the dashboard can link straight into the claim flow.
+    unknowns = registry.list_recent_unknowns()
+    for entry in unknowns:
+        entry['encoded'] = encode_packet(entry['data'])
+    return unknowns
 
 
 @app.get('/api/status')
@@ -195,14 +200,16 @@ def api_restart_receiver(name: str):
 # --- sensor CRUD ----------------------------------------------------------
 
 def _crud(action):
-    """Run a registry mutation, mapping its errors to clean HTTP responses: an invalid
-    sensor config (raised by build_sensor) becomes 400, a bad index becomes 404."""
+    """Run a registry mutation, mapping its errors to clean HTTP responses: invalid input
+    (e.g. a bad sensor config raised by build_sensor) becomes 400, a bad index 404."""
     try:
         return action()
     except IndexError as e:
         return JSONResponse({'error': str(e)}, status_code=404)
-    except Exception as e:  # KeyError / ValueError / etc. from build_sensor
-        return JSONResponse({'error': f'Invalid sensor config: {e}'}, status_code=400)
+    except KeyError as e:
+        return JSONResponse({'error': f'Missing required field: {e}'}, status_code=400)
+    except Exception as e:  # ValueError / build_sensor errors / etc.
+        return JSONResponse({'error': str(e)}, status_code=400)
 
 
 @app.post('/api/sensors')
@@ -260,6 +267,23 @@ def api_renew_test_sensor(test_id: str):
 def api_delete_test_sensor(test_id: str):
     registry.remove_test_sensor(test_id)
     return {'ok': True}
+
+
+# --- custom decoders ------------------------------------------------------
+
+@app.get('/api/decoders')
+def api_decoders():
+    return registry.list_custom_decoders()
+
+
+@app.post('/api/decoders')
+def api_add_decoder(payload: dict = Body(...)):
+    return _crud(lambda: registry.add_custom_decoder(payload.get('decoder', '')) or {'ok': True})
+
+
+@app.delete('/api/decoders/{index}')
+def api_delete_decoder(index: int):
+    return _crud(lambda: registry.remove_custom_decoder(index) or {'ok': True})
 
 
 @app.websocket('/ws')
