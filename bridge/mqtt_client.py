@@ -24,6 +24,17 @@ def publish(topic: str, value, retain: bool = MQTT_RETAIN):
     published_count += 1
 
 
+def disconnect():
+    global mqttc
+    if mqttc is not None:
+        try:
+            mqttc.loop_stop()
+            mqttc.disconnect()
+        except Exception:
+            pass
+        mqttc = None
+
+
 def status() -> dict[str, Any]:
     return {
         'connected': mqttc.is_connected() if mqttc is not None else False,

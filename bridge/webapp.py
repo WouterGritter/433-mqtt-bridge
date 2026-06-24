@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import signal
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,17 @@ async def lifespan(app: FastAPI):
     # pipeline can push events to WebSocket clients via call_soon_threadsafe.
     events.set_loop(asyncio.get_running_loop())
     yield
+    # Graceful shutdown: stop the background workers and the MQTT client. The signal
+    # handler in run() has usually already set the event and terminated the receivers;
+    # repeating it here is harmless and also covers a programmatic server stop.
+    print('Shutting down…')
+    registry.shutdown_event.set()
+    for receiver in registry.receivers:
+        receiver.stop()
+    for thread in registry.background_threads:
+        thread.join(timeout=5)
+    mqtt_client.disconnect()
+    print('Shutdown complete.')
 
 
 app = FastAPI(title='433-mqtt-bridge', lifespan=lifespan)
@@ -314,11 +326,18 @@ async def ws(websocket: WebSocket):
 
 
 def run():
-    """Run the web server in the foreground (blocking)."""
+    """Run the web server in the foreground (blocking) until SIGINT/SIGTERM."""
     print(f'Starting web server on {WEB_HOST}:{WEB_PORT}')
-    server = uvicorn.Server(uvicorn.Config(app, host=WEB_HOST, port=WEB_PORT, log_level='warning'))
-    # Leave signal handling to Python's default so SIGTERM terminates the process
-    # immediately (the receiver/processing threads are non-daemon and would otherwise
-    # keep it alive). This matches the bridge's pre-web shutdown behaviour.
-    server.install_signal_handlers = lambda: None
+    server = uvicorn.Server(uvicorn.Config(
+        app, host=WEB_HOST, port=WEB_PORT, log_level='warning', timeout_graceful_shutdown=5,
+    ))
+
+    # uvicorn captures SIGINT/SIGTERM itself: the first signal triggers a graceful stop
+    # (which runs our lifespan shutdown — terminating receivers, joining workers,
+    # disconnecting MQTT), a second forces an immediate exit. When it finishes it re-raises
+    # the signal to whatever handler was installed beforehand; install no-op handlers so
+    # that re-raise is silent instead of turning SIGINT into a KeyboardInterrupt traceback.
+    signal.signal(signal.SIGINT, lambda *_: None)
+    signal.signal(signal.SIGTERM, lambda *_: None)
+
     server.run()

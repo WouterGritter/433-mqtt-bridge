@@ -59,10 +59,12 @@ def main():
         stats.ensure_receiver(receiver.name)
         receiver.start()
 
-    threading.Thread(target=process_packet_worker).start()
+    worker_thread = threading.Thread(target=process_packet_worker, daemon=True)
+    registry.background_threads.append(worker_thread)
+    worker_thread.start()
 
-    # Runs in the foreground (main thread) for clean signal handling; the receiver and
-    # packet-processing threads keep running alongside it.
+    # Runs in the foreground (main thread); it installs the signal handlers and drives a
+    # graceful shutdown of the receiver and packet-processing threads on SIGINT/SIGTERM.
     webapp.run()
 
 

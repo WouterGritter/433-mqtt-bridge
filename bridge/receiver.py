@@ -1,6 +1,5 @@
 import subprocess
 import threading
-import time
 from typing import Optional
 
 from . import events
@@ -9,13 +8,18 @@ from . import stats
 from .notifications import send_discord_message
 from .packet import parse_rtl_433_packet
 
+# Delay before respawning a crashed rtl_433, and how long to wait after an exit for a
+# shutdown signal to land before treating the exit as a crash worth restarting.
+RESTART_DELAY = 30.0
+SHUTDOWN_GRACE = 0.5
+
 
 class Receiver:
     def __init__(self, name: str, arguments: str):
         self.name = name
         self.arguments = arguments
         # The currently running rtl_433 subprocess, exposed so it can be restarted from
-        # the dashboard (terminating it makes receiver_worker respawn it).
+        # the dashboard or terminated on shutdown.
         self.process: Optional[subprocess.Popen] = None
 
     def restart(self) -> bool:
@@ -26,6 +30,13 @@ class Receiver:
             return False
         process.terminate()
         return True
+
+    def stop(self) -> None:
+        """Terminate the running rtl_433 process for shutdown. The worker loop sees
+        shutdown_event set and exits instead of respawning it."""
+        process = self.process
+        if process is not None and process.poll() is None:
+            process.terminate()
 
     def start(self):
         command = f'rtl_433 {self.arguments}'
@@ -41,10 +52,12 @@ class Receiver:
 
         command_args = [arg.strip() for arg in command.split(' ') if arg.strip() != '']
 
-        threading.Thread(target=self.receiver_worker, args=(command_args,)).start()
+        thread = threading.Thread(target=self.receiver_worker, args=(command_args,), daemon=True)
+        registry.background_threads.append(thread)
+        thread.start()
 
     def receiver_worker(self, command_args: list[str]):
-        while True:
+        while not registry.shutdown_event.is_set():
             print(f'Running rtl_433[{self.name}] with arguments {" ".join(command_args[1:])}')
             process = subprocess.Popen(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             self.process = process
@@ -63,14 +76,22 @@ class Receiver:
             exit_code = process.wait()
             self.process = None
             stats.set_receiver_running(self.name, False)
-            stats.mark_receiver_restart(self.name)
             events.emit('receiver_status', stats.receiver_snapshot(self.name))
 
+            # If we're shutting down, exit cleanly without logging a spurious restart.
+            # The brief wait gives a just-delivered signal time to set the event.
+            if registry.shutdown_event.wait(SHUTDOWN_GRACE):
+                break
+
+            stats.mark_receiver_restart(self.name)
             message = f'rtl_433[{self.name}] exited with code {exit_code}. Restarting rtl_433 command after a delay.'
             send_discord_message(message)
             print(message)
 
-            time.sleep(30.0)
+            # Interruptible delay so shutdown during the backoff exits immediately.
+            registry.shutdown_event.wait(RESTART_DELAY)
+
+        print(f'rtl_433[{self.name}] stopped.')
 
     def read_stderr_worker(self, process: subprocess.Popen):
         while True:

@@ -57,7 +57,11 @@ def emit(event_type: str, payload: dict[str, Any]) -> None:
         subscribers = list(_subscribers)
 
     for queue in subscribers:
-        loop.call_soon_threadsafe(_offer, queue, event)
+        try:
+            loop.call_soon_threadsafe(_offer, queue, event)
+        except RuntimeError:
+            # The loop is shutting down / closed; drop the event.
+            return
 
 
 def _offer(queue: 'asyncio.Queue[dict[str, Any]]', event: dict[str, Any]) -> None:

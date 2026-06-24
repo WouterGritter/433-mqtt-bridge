@@ -1,4 +1,5 @@
 import json
+from queue import Empty
 
 from . import events
 from . import registry
@@ -124,8 +125,12 @@ def process_packet(packet: Packet, duplicate: bool = False):
 def process_packet_worker():
     previous_packets = PacketTimeRingBuffer(max_age=IGNORE_DUPLICATE_PACKETS_TIMEFRAME)
 
-    while True:
-        packet = registry.packet_receive_queue.get()
+    while not registry.shutdown_event.is_set():
+        # Time out periodically so a shutdown is noticed even when no packets arrive.
+        try:
+            packet = registry.packet_receive_queue.get(timeout=0.5)
+        except Empty:
+            continue
 
         # Duplicates are still processed (to attribute the reception to their receiver),
         # but flagged so they don't get published/persisted/re-notified again.

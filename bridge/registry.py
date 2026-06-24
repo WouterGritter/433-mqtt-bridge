@@ -20,6 +20,14 @@ if TYPE_CHECKING:
 # repeated readings from the same unknown device into a single most-recent entry.
 _DEVICE_FIELDS = ('model', 'subtype', 'id', 'channel', 'type')
 
+# Set when the process is shutting down. Long-running worker loops watch this to exit
+# cleanly (stop restarting receivers, stop draining the queue) instead of being killed.
+shutdown_event = threading.Event()
+
+# Long-running worker threads (receivers, the packet processor) registered here so the
+# shutdown sequence can join them.
+background_threads: list[threading.Thread] = []
+
 custom_decoders: list[str] = []
 
 receivers: list['Receiver'] = []
