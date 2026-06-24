@@ -71,7 +71,9 @@ function makeChart(container) {
   const opts = {
     width: container.clientWidth || 260,
     height: 70,
-    cursor: { show: true, points: { show: true } },
+    // Note: do not set cursor.points.show to a boolean — uPlot expects it to be a
+    // function returning the point DOM element, so the default must be left in place.
+    cursor: { show: true },
     legend: { show: false },
     scales: { x: { time: true } },
     axes: [
