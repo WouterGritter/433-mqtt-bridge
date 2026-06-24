@@ -1,6 +1,9 @@
 import json
 
+from . import events
 from . import registry
+from . import stats
+from . import storage
 from .config import BASE_URL, IGNORE_DUPLICATE_PACKETS_TIMEFRAME
 from .mqtt_client import publish
 from .notifications import build_claim_url, send_discord_message
@@ -19,8 +22,20 @@ def with_claim_link(message: str, packet: Packet) -> str:
 
 def process_packet(packet: Packet):
     sensor = registry.find_sensor(packet)
+    ignored = sensor is None and registry.is_ignored(packet)
 
-    if sensor is None and registry.is_ignored(packet):
+    # Receiver stats and the raw firehose count every packet the bridge sees, including
+    # ignored ones (they are still received), so the dashboard reflects reality.
+    stats.record_receiver_packet(packet)
+    events.emit('packet', {
+        'receiver': packet.origin.name,
+        'time': packet.receive_time.isoformat(),
+        'data': packet.data,
+        'sensor': sensor.topic_prefix if sensor is not None else None,
+        'ignored': ignored,
+    })
+
+    if ignored:
         return
 
     if packet.data.get('button', 0) == 1:
@@ -42,10 +57,27 @@ def process_packet(packet: Packet):
 
         send_discord_message(with_claim_link(discord_message, packet))
 
-    if sensor is not None:
-        sensor.last_seen = packet.receive_time
-        for reading in sensor.process(packet):
-            publish(reading.topic, reading.value, retain=reading.retain)
+    if sensor is None:
+        registry.record_unknown(packet)
+        return
+
+    sensor.last_seen = packet.receive_time
+    readings = sensor.process(packet)
+
+    ts = packet.receive_time.timestamp()
+    for reading in readings:
+        publish(reading.topic, reading.value, retain=reading.retain)
+        storage.record(sensor.topic_prefix, reading.topic, reading.value, ts)
+
+    stats.record_sensor_packet(sensor, packet, readings)
+    events.emit('reading', {
+        'sensor': sensor.topic_prefix,
+        'receiver': packet.origin.name,
+        'time': packet.receive_time.isoformat(),
+        'raw': packet.data,
+        'readings': {reading.topic: reading.value for reading in readings},
+        'snapshot': stats.sensor_snapshot(sensor.topic_prefix),
+    })
 
 
 def process_packet_worker():

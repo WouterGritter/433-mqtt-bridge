@@ -3,6 +3,7 @@ import threading
 
 from . import mqtt_client
 from . import registry
+from . import stats
 from . import storage
 from . import webapp
 from .config import (
@@ -55,6 +56,7 @@ def main():
     mqtt_client.connect()
 
     for receiver in registry.receivers:
+        stats.ensure_receiver(receiver.name)
         receiver.start()
 
     threading.Thread(target=process_packet_worker).start()
