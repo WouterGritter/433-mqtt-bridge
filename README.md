@@ -96,8 +96,9 @@ The bridge serves a web interface (FastAPI) on `WEB_HOST:WEB_PORT`. It is
 A live dashboard (updated over a WebSocket) showing:
 
 - **Sensors** — per-sensor cards with the latest parsed values, battery and signal
-  status, packet rate, a freshness/stale indicator, and a sparkline of recent history
-  (persisted to SQLite, so it survives restarts).
+  status, packet rate, the average interval between recent messages, a freshness/stale
+  indicator, and a sparkline of recent history (persisted to SQLite, so it survives
+  restarts).
 - **Receivers** — per-receiver status (running, restart count, packet rate, last seen,
   average signal) with a **Restart** button.
 - **Raw feed** — a live firehose of every received packet, with a text filter, tagging

@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 # Window (seconds) over which packets-per-minute and average signal are computed.
 _RATE_WINDOW = 60.0
 
+# Number of recent messages kept per sensor to compute the average inter-message interval.
+_INTERVAL_WINDOW = 10
+
 _lock = threading.Lock()
 
 
@@ -50,6 +53,10 @@ class SensorStats:
         self.rssi: Optional[float] = None
         self.snr: Optional[float] = None
         self._recent: deque[float] = deque()
+        # Receive times (unix epoch) of the last few messages, used to derive the average
+        # interval between messages. Unlike `_recent` this is not time-windowed, so it stays
+        # meaningful for sensors that report only every few minutes/hours.
+        self._message_times: deque[float] = deque(maxlen=_INTERVAL_WINDOW)
         # Which receivers have picked this sensor up, and when last. Updated for every
         # reception including de-duplicated copies, so a sensor heard by several
         # receivers shows them all even though only one copy is published.
@@ -80,6 +87,19 @@ class SensorStats:
 
         self._recent.append(now)
         _trim(self._recent, now)
+        self._message_times.append(packet.receive_time.timestamp())
+
+    def prime(self, timestamps: list[float]) -> None:
+        """Seed the recent-message times from persisted history so the average interval is
+        meaningful right after a restart instead of needing a fresh window of messages."""
+        self._message_times.extend(timestamps)
+
+    def _avg_interval(self) -> Optional[float]:
+        """Mean seconds between the last few messages, or None with fewer than two."""
+        times = self._message_times
+        if len(times) < 2:
+            return None
+        return (times[-1] - times[0]) / (len(times) - 1)
 
     def snapshot(self) -> dict[str, Any]:
         now = time.time()
@@ -91,6 +111,7 @@ class SensorStats:
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
             'seconds_since_seen': (now_dt - self.last_seen).total_seconds() if self.last_seen else None,
             'rate_per_min': len(self._recent),
+            'avg_interval_seconds': self._avg_interval(),
             'last_readings': self.last_readings,
             'last_raw': self.last_raw,
             'battery_ok': self.battery_ok,
@@ -176,6 +197,16 @@ def _get_receiver(name: str) -> ReceiverStats:
 def record_sensor_packet(sensor: 'RadioSensor', packet: 'Packet', readings: list['Reading']) -> None:
     with _lock:
         _get_sensor(sensor.topic_prefix).record(packet, readings)
+
+
+def prime_sensor(key: str, timestamps: list[float]) -> None:
+    """Seed a sensor's recent-message times from persisted history (see SensorStats.prime).
+    Called once at startup; a no-op for sensors with no stored history so they keep the
+    'no stats until first seen' behaviour."""
+    if not timestamps:
+        return
+    with _lock:
+        _get_sensor(key).prime(timestamps)
 
 
 def record_sensor_source(sensor_key: str, receiver_name: str, when: datetime) -> None:

@@ -124,3 +124,20 @@ def query_history(sensor_key: str, since: float, topic: Optional[str] = None) ->
         ]
     finally:
         conn.close()
+
+
+def recent_message_timestamps(sensor_key: str, limit: int) -> list[float]:
+    """The `limit` most recent message timestamps for a sensor, oldest first.
+
+    A single packet produces one row per topic, all sharing the same `ts`, so we select
+    distinct timestamps to count messages rather than readings. Used to seed the live
+    average-interval stat at startup."""
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            'SELECT DISTINCT ts FROM readings WHERE sensor_key = ? ORDER BY ts DESC LIMIT ?',
+            (sensor_key, limit),
+        )
+        return sorted(row[0] for row in cursor.fetchall())
+    finally:
+        conn.close()

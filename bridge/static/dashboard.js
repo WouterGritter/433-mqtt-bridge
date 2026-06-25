@@ -35,6 +35,16 @@ function fmtAge(seconds) {
   return Math.floor(seconds / 86400) + 'd ago';
 }
 
+function fmtDuration(seconds) {
+  // A bare duration (no "ago"), used for the average interval between messages.
+  if (seconds == null || !isFinite(seconds)) return null;
+  seconds = Math.max(0, Math.round(seconds));
+  if (seconds < 60) return seconds + 's';
+  if (seconds < 3600) return Math.round(seconds / 60) + 'm';
+  if (seconds < 86400) return Math.round(seconds / 3600) + 'h';
+  return Math.round(seconds / 86400) + 'd';
+}
+
 function fmtValue(v) {
   if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(2);
   return String(v);
@@ -131,7 +141,7 @@ function createSensorCard(sensor) {
   const entry = {
     el: card,
     refs: { dot, readings, age, rate, battery, signal, sources, spark },
-    chart: null, xs: [], ys: [], primaryTopic: null, lastSeen: null, sourcesData: [],
+    chart: null, xs: [], ys: [], primaryTopic: null, lastSeen: null, avgInterval: null, sourcesData: [],
   };
   sensorCards.set(sensor.key, entry);
 
@@ -194,6 +204,7 @@ function updateSensorStats(key, s) {
   }
 
   entry.lastSeen = s.last_seen ? Date.parse(s.last_seen) : null;
+  entry.avgInterval = s.avg_interval_seconds;
   r.rate.textContent = (s.rate_per_min || 0) + '/min';
   r.battery.textContent = s.battery_ok == null ? '' : (s.battery_ok ? '🔋 ok' : '🪫 low');
   r.signal.textContent = s.rssi == null ? '' : ('📶 ' + s.rssi.toFixed(0) + ' dBm');
@@ -234,15 +245,23 @@ function refreshAge(key) {
   if (!entry) return;
   renderSources(entry);
   const r = entry.refs;
+
+  // The card shows the average interval between messages; the dot/staleness colouring is
+  // still driven by how long it's actually been since the last message.
+  const interval = fmtDuration(entry.avgInterval);
+
   if (entry.lastSeen == null) {
-    r.age.textContent = 'not seen';
+    r.age.textContent = interval ? 'every ~' + interval : 'not seen';
+    r.age.title = 'Not seen since restart';
     r.age.className = 'age-offline';
     entry.el.classList.add('offline'); entry.el.classList.remove('stale');
     r.dot.className = 'dot dot-bad';
     return;
   }
   const seconds = (Date.now() - entry.lastSeen) / 1000;
-  r.age.textContent = fmtAge(seconds);
+  // Fall back to "ago" until we have enough messages to know the interval.
+  r.age.textContent = interval ? 'every ~' + interval : fmtAge(seconds);
+  r.age.title = 'Last message ' + fmtAge(seconds);
   entry.el.classList.remove('stale', 'offline');
   if (seconds < FRESH_S) { r.dot.className = 'dot dot-good'; r.age.className = ''; }
   else if (seconds < STALE_S) { r.dot.className = 'dot dot-warn'; r.age.className = 'age-stale'; entry.el.classList.add('stale'); }

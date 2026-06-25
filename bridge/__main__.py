@@ -53,6 +53,11 @@ def main():
 
     storage.init()
 
+    # Seed each sensor's average-interval stat from persisted history so it is meaningful
+    # immediately, rather than after a fresh window of messages has accumulated.
+    for sensor in registry.sensors:
+        stats.prime_sensor(sensor.topic_prefix, storage.recent_message_timestamps(sensor.topic_prefix, 10))
+
     mqtt_client.connect()
 
     for receiver in registry.receivers:
