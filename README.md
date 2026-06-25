@@ -51,6 +51,13 @@ The bridge is configured through a `.env` file and two YAML files. See `.env.exa
 | `IGNORE_DUPLICATE_PACKETS_TIMEFRAME` | `3` | Seconds within which identical packets are dropped |
 | `STATS_DB_PATH` | `stats.db` | SQLite file storing reading history for the dashboard |
 | `STATS_RETENTION_DAYS` | `30` | How long reading history is kept before pruning |
+| `MONITOR_ENABLED` | `true` | Enable the ping-pong / id-collision monitor (see below) |
+| `MONITOR_WINDOW_SECONDS` | `900` | Sliding window of recent readings the monitor judges |
+| `MONITOR_MIN_SAMPLES` | `8` | Min readings needed within the window to evaluate a sensor |
+| `MONITOR_MIN_AMPLITUDE` | `1.0` | Min gap between the two value levels, in the reading's native units |
+| `MONITOR_SEPARATION_RATIO` | `3.0` | Min gap-to-within-cluster-spread ratio for the two levels to count as distinct |
+| `MONITOR_RUNS_Z` | `2.0` | Min runs-test z-score (alternation strength) needed to alert |
+| `MONITOR_COOLDOWN_SECONDS` | `21600` | Min seconds between repeat alerts for the same sensor |
 
 ### Receivers (`receivers.yml`)
 
@@ -131,6 +138,34 @@ configured sensors whose identifier matches on everything *except* `id` (e.g. sa
 `sensors.yml` **and** applied to the running process immediately, so no restart is
 needed. Devices without an `id` (buttons, door sensors) use stable raw codes and are
 unaffected.
+
+### Ping-pong / id-collision alerts
+
+Because each id-bearing sensor picks a **random `id` (0-255)** on every battery swap,
+two physically distinct sensors can end up sharing an `id` and both match the same
+configured sensor — so their readings interleave on one topic and the published value
+"ping-pongs" between them. The monitor watches each id-bearing sensor's numeric readings
+and sends a Discord alert when it spots this, even if the two sensors *started out*
+reading similarly and only drifted apart later.
+
+It distinguishes a real collision from a single sensor's natural variation by requiring,
+together, over a sliding window (`MONITOR_WINDOW_SECONDS`):
+
+- **enough readings** in the window (`MONITOR_MIN_SAMPLES`) — which also means sensors
+  that report too rarely to judge (very flaky temperature sensors, TPMS, lightning) are
+  simply never evaluated and never false-alarm;
+- **two well-separated value levels** — the gap must clear `MONITOR_MIN_AMPLITUDE`
+  (native units, so trivial quantization jitter is ignored) and be at least
+  `MONITOR_SEPARATION_RATIO`× the spread within each level (so two sensors only trip the
+  alert once they have actually drifted apart);
+- **rapid alternation** between those levels — measured with the Wald-Wolfowitz runs
+  test; a single, smoothly drifting sensor produces *few* runs (it can't jump back and
+  forth between two levels every message), while a collision produces *many*
+  (`MONITOR_RUNS_Z`).
+
+Repeat alerts for the same sensor are rate-limited (`MONITOR_COOLDOWN_SECONDS`) since
+clearing a collision needs a physical fix (re-pair the sensor, or re-claim it). The whole
+monitor can be turned off with `MONITOR_ENABLED=false`.
 
 ## Running
 

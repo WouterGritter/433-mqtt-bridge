@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import events
+from . import monitor
 from . import mqtt_client
 from . import registry
 from . import stats
@@ -235,6 +236,7 @@ def api_update_sensor(index: int, config: dict = Body(...)):
         old_key, new_key = registry.update_sensor(index, config)
         if old_key != new_key:
             stats.drop_sensor(old_key)
+            monitor.drop_sensor(old_key)
         return {'key': new_key}
     return _crud(action)
 
@@ -244,6 +246,7 @@ def api_delete_sensor(index: int):
     def action():
         key = registry.remove_sensor(index)
         stats.drop_sensor(key)
+        monitor.drop_sensor(key)
         return {'removed': key}
     return _crud(action)
 

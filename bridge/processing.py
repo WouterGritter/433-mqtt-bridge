@@ -2,6 +2,7 @@ import json
 from queue import Empty
 
 from . import events
+from . import monitor
 from . import registry
 from . import stats
 from . import storage
@@ -112,6 +113,12 @@ def process_packet(packet: Packet, duplicate: bool = False):
         storage.record(sensor.topic_prefix, reading.topic, reading.value, ts)
 
     stats.record_sensor_packet(sensor, packet, readings)
+    # Watch for two sensors colliding on the same random id (id-bearing sensors only);
+    # guarded so monitoring can never break the publish pipeline.
+    try:
+        monitor.record(sensor, readings, packet.receive_time)
+    except Exception as e:
+        print(f'monitor: failed to evaluate {sensor.topic_prefix}: {e}')
     events.emit('reading', {
         'sensor': sensor.topic_prefix,
         'receiver': packet.origin.name,
