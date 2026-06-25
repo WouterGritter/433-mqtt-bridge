@@ -56,6 +56,10 @@
       <div class="section-head">
         <h2>Raw feed</h2>
         <div class="feed-controls">
+          <select id="feed-mode" title="Quiet collapses repeated messages into a single counted line">
+            <option value="quiet" selected>quiet (deduplicated)</option>
+            <option value="verbose">verbose (every message)</option>
+          </select>
           <input id="feed-filter" type="text" placeholder="Filter (substring)…">
           <label><input type="checkbox" id="feed-pause"> pause</label>
           <button id="feed-clear" type="button">clear</button>

@@ -324,32 +324,103 @@ async function restartReceiver(name, button) {
 }
 
 // --- raw feed --------------------------------------------------------------
+//
+// Every packet is buffered, and the visible feed is rendered from that buffer.
+// Two modes share the buffer:
+//   verbose - one line per packet, exactly as it was received (duplicates and all).
+//   quiet   - chrome-console style: a run of identical readings collapses into a
+//             single line whose "Nx" badge counts how many copies arrived.
+// A re-render is cheap (capped at MAX_FEED lines) and coalesced to one per frame,
+// so bursts of duplicates don't thrash the DOM.
 
 const feedEl = document.getElementById('feed');
 const feedFilter = document.getElementById('feed-filter');
 const feedPause = document.getElementById('feed-pause');
-document.getElementById('feed-clear').addEventListener('click', () => { feedEl.innerHTML = ''; });
+const feedMode = document.getElementById('feed-mode');
+const feedBuffer = [];        // recent packet events, newest last
+let feedRenderQueued = false;
 
-function addFeedLine(ev) {
-  if (feedPause.checked) return;
+document.getElementById('feed-clear').addEventListener('click', () => {
+  feedBuffer.length = 0;
+  feedEl.innerHTML = '';
+});
+feedMode.addEventListener('change', renderFeed);
+feedFilter.addEventListener('input', renderFeed);
+
+// In quiet mode the receiver and exact time are collapsed away, so identical data
+// for the same sensor is the unit of de-duplication (mirrors the backend's window).
+function quietKey(ev) {
+  return (ev.sensor || (ev.ignored ? '\0ignored' : '\0unknown')) + '\0' + JSON.stringify(ev.data);
+}
+
+function passesFilter(ev, includeReceiver) {
+  const filter = feedFilter.value.trim().toLowerCase();
+  if (!filter) return true;
+  const label = ev.ignored ? 'IGNORED' : (ev.sensor ? ev.sensor : 'UNKNOWN');
+  const hay = JSON.stringify(ev.data) + ' ' + label + (includeReceiver ? ' ' + ev.receiver : '');
+  return hay.toLowerCase().includes(filter);
+}
+
+function buildFeedLine(ev, count) {
+  // count is null in verbose mode; a number (>= 1) renders the "Nx" badge in quiet mode.
   const json = JSON.stringify(ev.data);
   const tag = ev.ignored ? 'ignored' : (ev.sensor ? 'known' : 'unknown');
   const label = ev.ignored ? 'IGNORED' : (ev.sensor ? ev.sensor : 'UNKNOWN');
 
-  const filter = feedFilter.value.trim().toLowerCase();
-  if (filter && !(json + ' ' + ev.receiver + ' ' + label).toLowerCase().includes(filter)) return;
-
-  const line = el('div', 'line' + (ev.duplicate ? ' dup' : ''));
+  const line = el('div', 'line' + (count === null && ev.duplicate ? ' dup' : ''));
   line.appendChild(el('span', 'ts', new Date(ev.time).toLocaleTimeString() + ' '));
   line.appendChild(el('span', 'rcv', ev.receiver + ' '));
   line.appendChild(el('span', 'tag tag-' + tag, label));
-  if (ev.duplicate) line.appendChild(el('span', 'tag tag-dup', 'dup'));
+  if (count !== null) {
+    line.appendChild(el('span', 'tag tag-count', count + 'x'));
+  } else if (ev.duplicate) {
+    line.appendChild(el('span', 'tag tag-dup', 'dup'));
+  }
   line.appendChild(document.createTextNode(' ' + json));
+  return line;
+}
 
+function renderFeed() {
   const atBottom = feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 40;
-  feedEl.appendChild(line);
-  while (feedEl.childElementCount > MAX_FEED) feedEl.removeChild(feedEl.firstChild);
-  if (atBottom) feedEl.scrollTop = feedEl.scrollHeight;
+  const prevTop = feedEl.scrollTop;
+  const frag = document.createDocumentFragment();
+
+  if (feedMode.value === 'verbose') {
+    for (const ev of feedBuffer) {
+      if (passesFilter(ev, true)) frag.appendChild(buildFeedLine(ev, null));
+    }
+  } else {
+    // Collapse runs of identical readings; a non-duplicate (or an orphaned duplicate
+    // whose original has scrolled off) opens a fresh group, later duplicates bump it.
+    const groups = [];
+    const open = new Map();   // key -> most recent group
+    for (const ev of feedBuffer) {
+      const key = quietKey(ev);
+      const g = open.get(key);
+      if (ev.duplicate && g) {
+        g.count++;
+      } else {
+        const ng = { ev, count: 1 };
+        groups.push(ng);
+        open.set(key, ng);
+      }
+    }
+    for (const g of groups) {
+      if (passesFilter(g.ev, false)) frag.appendChild(buildFeedLine(g.ev, g.count));
+    }
+  }
+
+  feedEl.replaceChildren(frag);
+  feedEl.scrollTop = atBottom ? feedEl.scrollHeight : prevTop;
+}
+
+function addFeedLine(ev) {
+  if (feedPause.checked) return;
+  feedBuffer.push(ev);
+  while (feedBuffer.length > MAX_FEED) feedBuffer.shift();
+  if (feedRenderQueued) return;
+  feedRenderQueued = true;
+  requestAnimationFrame(() => { feedRenderQueued = false; renderFeed(); });
 }
 
 // --- status pills ----------------------------------------------------------

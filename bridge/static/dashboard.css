@@ -43,6 +43,7 @@ section h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: .04em; 
 .section-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
 .feed-controls { display: flex; align-items: center; gap: .6rem; font-size: .85rem; color: var(--muted); }
 .feed-controls input[type=text] { padding: .35rem .5rem; border: 1px solid var(--border); border-radius: 6px; min-width: 14rem; font-size: .85rem; }
+.feed-controls select { font: inherit; color: var(--text); padding: .35rem .5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--card); font-size: .85rem; }
 
 .status-bar { display: flex; gap: .5rem; flex-wrap: wrap; }
 .pill {
@@ -122,6 +123,7 @@ button:disabled { opacity: .5; cursor: default; }
 .feed .tag-unknown { background: #4a3a12; color: #f2c869; }
 .feed .tag-ignored { background: #2a2f37; color: #8a93a0; }
 .feed .tag-dup { background: #23303f; color: #7fa7ff; margin-left: .25rem; }
+.feed .tag-count { background: #23303f; color: #7fa7ff; margin-left: .25rem; font-variant-numeric: tabular-nums; }
 .feed .rcv { color: #7fa7ff; }
 
 .empty { color: var(--muted); font-size: .85rem; }
